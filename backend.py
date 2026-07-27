@@ -4,9 +4,13 @@
 import numpy as np
 import pandas as pd
 import random
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 import math
+
+from iFinDPy import *
+
 
 # ===================== 默认参数配置 =====================
 DEFAULT_CONFIG = {
@@ -37,15 +41,15 @@ DEFAULT_CONFIG = {
         "RSF_base": 21_644_000_000,
         "net_capital_base": 16_496_000_000,
         "total_risk_reserve_base": 740_000_000,
-        "on_off_balance_total_asset_base": 300_000_000_000,  # 2025年12月31日表内总资产203_218_275_359.99
+        "on_off_balance_total_asset_base": 300_000_000_000,
     }
 }
 
 
-# ===================== 模块A：客户端 =====================
+# ===================== 模块A：场外衍生品合约（OtcContract） =====================
 @dataclass
-class ClientContract:
-    """对应模块A：客户端业务要素"""
+class OtcContract:
+    """对应模块A：场外衍生品业务要素"""
     # 基础信息
     contract_type: str          # 场外期权 | 场外期权 | 收益互换 | 收益凭证
     direction: str              # "buy" | "sell" (期权) / "long" | "short" (互换)
@@ -82,27 +86,27 @@ class ClientContract:
     begin_date: Optional[str] = None            # 合约起始日（YYYY-MM-DD）
     term_days: int = 90                         # 合约期限（天）
     
-    def get_contract_type(self) -> str:
+    def get_otc_contract_type(self) -> str:
         """获取合约类型"""
         return self.contract_type
     
-    def get_direction(self) -> str:
+    def get_otc_contract_direction(self) -> str:
         """获取交易方向"""
         return self.direction
     
-    def get_notional(self) -> float:
+    def get_otc_contract_notional(self) -> float:
         """获取名义本金"""
         return self.notional
     
-    def get_underlying_type(self) -> str:
+    def get_otc_underlying_type(self) -> str:
         """获取标的资产类型"""
         return self.underlying_type
     
-    def get_underlying_name(self) -> Optional[str]:
+    def get_otc_underlying_name(self) -> Optional[str]:
         """获取标的资产名称"""
         return self.underlying_name
     
-    def get_underlying_code(self) -> Optional[str]:
+    def get_otc_underlying_code(self) -> Optional[str]:
         """获取标的资产代码"""
         return self.underlying_code
     
@@ -182,8 +186,8 @@ class ClientContract:
         """获取合约期限（天）"""
         return self.term_days
 
-    def get_client_cash_inflow(self) -> float:
-        """计算客户端首日现金净流入（万元，正值=流入）"""
+    def get_otc_contract_cash_inflow(self) -> float:
+        """计算场外合约首日现金净流入（万元，正值=流入）"""
         if (self.contract_type == "call_option" or self.contract_type == "put_option"):
             if self.total_premium_amount is not None:
                 premium = self.total_premium_amount
@@ -225,8 +229,8 @@ class ClientContract:
             return abs(ratio - 1.0) < 0.001
         return abs(DEFAULT_CONFIG["client"]["swap_margin_rate"] - 100.0) < 0.001
     
-    def get_client_delta_amount(self) -> float:
-        """获取Delta值（%）"""
+    def get_otc_delta_amount(self) -> float:
+        """获取场外合约Delta金额（万元）"""
         is_long = 1 if self.direction == "long" else -1
         if "option" in self.contract_type:
             is_call = 1 if self.option_type == "call_option" else -1
@@ -251,6 +255,7 @@ class HedgeTrade:
     tool_type: str              # ETF | 股票 | 股指期货 | 场内期权 | 场外背对背期权 | 私募基金
     direction: str              # "long" | "short"
     notional: float             # 名义价值/对冲总金额（万元）
+    tool_code: Optional[str] = None  # 对冲工具iFinD代码
     # 标的资产属性
     underlying_type: Optional[str] = None  # 衍生品的底层资产类型，若为股票或ETF，直接为tool_type
     underlying_name: Optional[str] = None  # 对冲工具底层资产名称
@@ -330,6 +335,9 @@ class HedgeTrade:
     def get_tool_direction(self) -> str:
         """获取对冲工具方向"""
         return self.direction
+
+    def get_tool_code(self) -> str:
+        return self.tool_code
     
     def get_tool_stock_type(self) -> Optional[str]:
         """获取对冲工具股票类型"""
@@ -363,86 +371,194 @@ class HedgeTrade:
 
 # ===================== 核心计算函数 =====================
 
-def get_underlying_price(underlying_code: str) -> Dict[str, List[float]]:
-    """获取产品底层过去一年的价格（列表）; 返回格式: {"代码": [价格列表]}"""
-    # 示例数据，实际使用时替换为真实数据源
-    sample_data = {
-        "000300": [150.0, 148.0, 152.0, 145.0, 140.0, 135.0, 130.0, 125.0, 120.0, 118.0],
-        "000852": [2500.0, 2480.0, 2520.0, 2450.0, 2400.0, 2350.0, 2300.0, 2250.0, 2200.0, 2180.0],
-        "510050": [100.0, 98.0, 102.0, 95.0, 90.0, 85.0, 80.0, 75.0, 70.0, 68.0],
-        "000688": [50.0, 48.0, 52.0, 45.0, 40.0, 35.0, 30.0, 25.0, 20.0, 18.0],
-    }
-    
-    # 如果找不到对应代码，返回默认数据
-    if underlying_code not in sample_data:
-        import random
-        random.seed(hash(underlying_code) % 10000)
-        prices = [100.0 + random.uniform(-20, 20) for _ in range(10)]
-        return {underlying_code: prices}
-    
-    return {underlying_code: sample_data[underlying_code]}
-    
 
-def calculate_correlation(client_code: str, client_prices: Dict[str, List[float]],
+# =============== 判断是否有效对冲函数组 ==============
+def ifind_login():
+    '''登录iFinD函数'''
+    # 输入用户的帐号和密码
+    thsLogin = THS_iFinDLogin('glzq703','96998XuY')
+    print(thsLogin)
+    if thsLogin in {0, -201}:
+        print('登录成功')
+        return True
+    else:
+        print('登录失败')
+        return False
+
+def get_underlying_price_series(underlying_code: str, 
+                         price_type: str = "close", 
+                         start_date: Optional[str] = None, 
+                         end_date: Optional[str] = None) -> Dict[str, List[float]]:
+    """
+    获取产品底层过去一年的价格数据
+    Args:
+        underlying_code: 同花顺代码，如 'AAPL.O', '000300.SH'
+        start_date: 开始日期 'YYYY-MM-DD'，默认一年前
+        end_date: 结束日期 'YYYY-MM-DD'，默认今天
+        price_type: 价格类型，如 'close', 'open', 'high', 'low', 'pre_close'
+    Returns:
+        Dict[str, List[float]]: {"代码": [价格列表]}
+    """
+    if not ifind_login():
+        print("登录失败")
+        return {underlying_code: []}
+    # 获取当前日期与提前一年起始日期
+    if end_date is None:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    
+    try:
+        # 调用 THS_HQ 获取数据
+        result = THS_HQ(underlying_code, price_type, 'fill:omit', start_date, end_date)
+        if result is None:
+            print("THS_DS 返回 None")
+            return {underlying_code: []}
+        if hasattr(result, 'errorcode') and result.errorcode != 0:
+            print(f"获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
+            return {underlying_code: []}
+        data = pd.DataFrame(result.data)
+        THS_iFinDLogout()
+        if data.empty:
+            print("获取数据为空")
+            return {underlying_code: []}
+        return {underlying_code: data[price_type].tolist()}
+    
+    except Exception as e:
+        print(f"获取底层价格数据失败: {e}")
+        return {underlying_code: []}
+    
+def calculate_correlation_between_price_series(otc_code: str, otc_prices: Dict[str, List[float]],
     hedge_code: str, hedge_prices: Dict[str, List[float]]) -> float:
-    """计算两个标的价格序列的相关系数"""
+    """计算两个标的价格序列的相关系数
+    args:
+        otc_code: 场外合约代码
+        otc_prices: 场外合约价格字典
+        hedge_code: 对冲工具代码
+        hedge_prices: 对冲工具价格字典
+    returns:
+        float: 相关系数
+    """
     # 提取价格序列
-    client_series = pd.Series(client_prices.get(client_code, []))
+    otc_series = pd.Series(otc_prices.get(otc_code, []))
     hedge_series = pd.Series(hedge_prices.get(hedge_code, []))
-    if len(client_series) < 2 or len(hedge_series) < 2:
+    if len(otc_series) < 2 or len(hedge_series) < 2:
         return np.nan
     
     # 对齐长度
-    min_len = min(len(client_series), len(hedge_series))
-    client_aligned = client_series.iloc[:min_len]
+    min_len = min(len(otc_series), len(hedge_series))
+    otc_aligned = otc_series.iloc[:min_len]
     hedge_aligned = hedge_series.iloc[:min_len]
-    return client_aligned.corr(hedge_aligned)
+    corr = otc_aligned.corr(hedge_aligned)
+    return corr if corr is not None else np.nan
 
+def get_onsite_option_greeks(option_code: str, greek_letter: str = 'delta') -> Optional[float]:
+    """获取期权greeks值
+    args:
+        option_code: 期权代码
+        greek_letter: greek字母，如 'delta', 'gamma', 'vega', 'theta', 'rho'
+    returns:
+        float: 期权当日greek字母值，若当天交易未结束，返回前一交易日greek
+    """
+    if not ifind_login():
+        print("登录失败")
+        return None
+    # 5大常用希腊字母映射字典，不够再加
+    map_dict = {'delta': 'ths_delta_option','gamma': 'ths_gamma_option','vega': 'ths_vega_option','theta': 'ths_theta_option','rho': 'ths_rho_option'}
+    greek_wanted = map_dict.get(greek_letter, None)
+    # 当前日期和上一交易日的保守自然日（-14天）
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    conservative_date = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    if greek_wanted is None:
+        print(f"未找到{greek_letter}对应的greeks值")
+        return None
+    
+    try:
+        greeklist = THS_DS(option_code, greek_wanted,'100','Days:Tradedays,Fill:Blank', conservative_date, current_date)
+        if greeklist is None:
+            print("THS_DS 返回 None")
+            return None
+        if hasattr(greeklist, 'errorcode') and greeklist.errorcode != 0:
+            print(f"获取数据失败，错误码: {greeklist.errorcode}, 错误信息: {greeklist.errmsg}")
+            return None
+        data = pd.DataFrame(greeklist.data)
+        THS_iFinDLogout()
+        if data.empty:
+            print("获取数据为空")
+            return None
+        greek_value_list = data[greek_wanted].tolist()
+        if np.isnan(greek_value_list[-1]):
+            greek_value = greek_value_list[-2]
+        else:
+            greek_value = greek_value_list[-1]
+        return greek_value
+    
+    except Exception as e:
+        print(f"获取期权greeks值失败: {e}")
+        return None
 
-def is_effective_hedge(client: ClientContract, hedge_list: List[HedgeTrade]) -> bool:
+def is_effective_hedge(otc: OtcContract, hedge_list: List[HedgeTrade], price_type: str = "close") -> List[bool, Optional[str]]:
     """
     判断是否构成有效对冲
+    args:
+        otc: 场外合约对象
+        hedge_list: 对冲工具列表
+        price_type: 标的价格类型，如 'close', 'open', 'high', 'low', 'pre_close'
+    returns:
+        bool: 是否构成有效对冲
+    
     条件1：标的物相同 OR 过去一年价格相关性 ≥ 95%
     条件2：多头Delta绝对值与空头Delta绝对值比例在 80%-125% 之间
     """
     # ========== 条件1.1：判断标的物是否相同 ==========
-    client_underlying_code = client.get_underlying_code()
-    if client_underlying_code is None:
-        return False
+    otc_underlying_code = otc.get_otc_underlying_code()
+    if otc_underlying_code is None:
+        return [False, "未填写场外合约标的代码，默认不满足有效对冲条件"]
     hedge_tool_underlying_codes = [h.get_tool_underlying_code() for h in hedge_list if h.get_tool_underlying_code() is not None]
     if not hedge_tool_underlying_codes:
-        return False
+        return [False, "未填写对冲工具标的代码，默认不满足有效对冲条件"]
     
-    # 检查是否所有对冲工具的标的代码都与客户端相同
-    underlying_is_same = any(client_underlying_code == h_code for h_code in hedge_tool_underlying_codes)
+    # 检查是否所有对冲工具的标的代码都与场外合约相同
+    underlying_is_same = any(otc_underlying_code == h_code for h_code in hedge_tool_underlying_codes)
     
     # ========== 条件1.2：判断标的物过去一年价格相关性 ≥ 95% ==========
     correlation_met = True
     if not underlying_is_same:
-        client_price_data = get_underlying_price(client_underlying_code) # 产品底层过去一年价格
+        otc_price_data = get_underlying_price_series(otc_underlying_code, price_type) # 产品底层过去一年价格
+        if not otc_price_data.get(otc_underlying_code, []):
+            return [False, f"获取{otc.get_otc_contract_type()}产品标的：{otc.get_otc_underlying_code()}价格数据失败"]
         for hedge_tool_underlying_code in hedge_tool_underlying_codes:
-            hedge_price_data = get_underlying_price(hedge_tool_underlying_code) # 获取对冲工具底层过去一年的价格
+            hedge_price_data = get_underlying_price_series(hedge_tool_underlying_code, price_type) # 获取对冲工具底层过去一年的价格
+            if not hedge_price_data.get(hedge_tool_underlying_code, []):
+                return [False, f"获取对冲工具标的: {hedge_tool_underlying_code}价格数据失败"]
             # 计算相关系数
-            corr = calculate_correlation(client_underlying_code, client_price_data, hedge_tool_underlying_code, hedge_price_data)
-            if (not np.isnan(corr)) and corr < 0.95:
+            corr = calculate_correlation_between_price_series(otc_underlying_code, otc_price_data, hedge_tool_underlying_code, hedge_price_data)
+            if np.isnan(corr) or corr < 0.95:
                 correlation_met = False
                 break
         condition1 = underlying_is_same or correlation_met
         if not condition1:
-            return False
+            return [False, "标的代码不匹配或标的物过去一年价格相关性未达到95%"]
 
     # ========== 条件2：计算Delta值比例 ==========
     # 标的代码与Delta现金金额总列表
     all_positions = []
-    client_delta_amount = client.get_client_delta_amount()
-    client_direction = client.get_direction()
-    if client_delta_amount is not None and client_delta_amount != 0:
-        all_positions.append((client_direction, client_delta_amount))
+    otc_delta_amount = otc.get_otc_delta_amount()
+    otc_direction = otc.get_otc_contract_direction()
+    if otc_delta_amount is not None:
+        all_positions.append((otc_direction, otc_delta_amount))
+    else:
+        return [False, "未填写对冲工具Delta金额，默认不满足有效对冲条件"]
     for hedge in hedge_list:
         hedge_direction = hedge.get_tool_direction()
-        hedge_delta = hedge.get_hedge_delta_amount()
-        if hedge_delta is not None and hedge_delta != 0:
+        if hedge.get_tool_type() == "onsite_option":
+            hedge_delta = get_onsite_option_greeks(hedge.get_tool_code(), "delta")
+        else:
+            hedge_delta = hedge.get_hedge_delta_amount()
+        if hedge_delta is not None:
             all_positions.append((hedge_direction, hedge_delta))
+        else:
+            return [False, "未填写对冲工具Delta金额，或未成功获取相应期权delta值，请检查，否则默认不满足有效对冲条件"]
     if not all_positions:
         return False
     
@@ -450,15 +566,15 @@ def is_effective_hedge(client: ClientContract, hedge_list: List[HedgeTrade]) -> 
     long_delta = sum(abs(delta) for dir_, delta in all_positions if dir_ == "long")
     short_delta = sum(abs(delta) for dir_, delta in all_positions if dir_ == "short")
     if long_delta == 0 or short_delta == 0:
-        return False
+        return [False, "多头Delta绝对值或空头Delta绝对值为0，默认不满足有效对冲条件"]
     ratio = min(long_delta, short_delta) / max(long_delta, short_delta)
     if ratio < 0.80:
-        return False
+        return [False, "多头Delta绝对值与空头Delta绝对值比例不在80%-125%之间"]
     
     return True
 
 
-def calc_market_risk_reserve(client: ClientContract, hedge_list: List[HedgeTrade], is_hedge_effective: bool) -> float:
+def calc_market_risk_reserve(otc: OtcContract, hedge_list: List[HedgeTrade], is_hedge_effective: bool) -> float:
     """计算市场风险资本准备（万元）"""
     # 风险系数
     RATES = {
@@ -483,32 +599,32 @@ def calc_market_risk_reserve(client: ClientContract, hedge_list: List[HedgeTrade
     
     reserve = 0.0
 
-    # 客户端风险敞口
-    if client.contract_type == "option":
-        if client.direction == "buy":
-            premium = client.notional * (client.premium_rate or DEFAULT_CONFIG["client"]["option_premium_rate"]) / 100
+    # 场外合约风险敞口
+    if otc.contract_type == "option":
+        if otc.direction == "buy":
+            premium = otc.notional * (otc.premium_rate or DEFAULT_CONFIG["client"]["option_premium_rate"]) / 100
             reserve += premium * RATES["buy_option"]
         else:  # 卖出
-            if client.stress_loss is not None:
+            if otc.stress_loss is not None:
                 # 卖出场外期权
-                virtual = max(client.stress_loss * 5, client.notional * 0.005)
+                virtual = max(otc.stress_loss * 5, otc.notional * 0.005)
                 reserve += virtual * RATES["futures_swap"]
-            elif client.delta_amount is not None:
+            elif otc.delta_amount is not None:
                 # 卖出场内期权
-                reserve += client.delta_amount * 0.15 * RATES["futures_swap"]
+                reserve += otc.delta_amount * 0.15 * RATES["futures_swap"]
             else:
                 # 默认按名义本金估算
-                reserve += client.notional * 0.30 * RATES["futures_swap"]
+                reserve += otc.notional * 0.30 * RATES["futures_swap"]
     
-    elif client.contract_type == "swap":
-        exposure = client.notional * 0.10
+    elif otc.contract_type == "swap":
+        exposure = otc.notional * 0.10
         reserve += exposure * RATES["futures_swap"]
-        if client.margin_rate is not None and client.margin_rate < 100:
+        if otc.margin_rate is not None and otc.margin_rate < 100:
             reserve *= 2  # 非全额保证金加倍
     
-    elif client.contract_type == "income_note":
-        if client.expected_yield > 0.05:
-            reserve += client.notional * 0.05 * RATES["futures_swap"]
+    elif otc.contract_type == "income_note":
+        if otc.expected_yield > 0.05:
+            reserve += otc.notional * 0.05 * RATES["futures_swap"]
     
     # 有效对冲减免
     if is_hedge_effective and hedge_list:
@@ -517,19 +633,19 @@ def calc_market_risk_reserve(client: ClientContract, hedge_list: List[HedgeTrade
     return reserve
 
 
-def calc_credit_risk_reserve(client: ClientContract) -> float:
+def calc_credit_risk_reserve(otc: OtcContract) -> float:
     """计算信用风险资本准备（万元）"""
-    if client.contract_type == "swap" and client.margin_rate is not None and client.margin_rate < 100:
-        if client.underlying_type == "general_stock":
-            return client.notional * 0.05
+    if otc.contract_type == "swap" and otc.margin_rate is not None and otc.margin_rate < 100:
+        if otc.underlying_type == "general_stock":
+            return otc.notional * 0.05
     return 0.0
 
 
-def calc_total_risk_reserve(client: ClientContract, hedge_list: List[HedgeTrade], is_hedge_effective: bool) -> float:
+def calc_total_risk_reserve(otc: OtcContract, hedge_list: List[HedgeTrade], is_hedge_effective: bool) -> float:
     """计算各项风险资本准备合计（万元）"""
     total = (
-        calc_market_risk_reserve(client, hedge_list, is_hedge_effective)
-        + calc_credit_risk_reserve(client)
+        calc_market_risk_reserve(otc, hedge_list, is_hedge_effective)
+        + calc_credit_risk_reserve(otc)
         # + calc_operational_risk_reserve()  # 简化，暂为0
         # + calc_specific_risk_reserve()     # 简化，暂为0
     )
@@ -537,14 +653,14 @@ def calc_total_risk_reserve(client: ClientContract, hedge_list: List[HedgeTrade]
     return total
 
 
-def calc_lcr_impact(client: ClientContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
+def calc_lcr_impact(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
     """计算LCR影响（万元）"""
     hqla_change = 0.0
     cof_change = 0.0
     
-    # 客户端现金变动
-    client_cash = client.get_client_cash_inflow()
-    hqla_change += client_cash
+    # 场外合约现金变动
+    otc_cash = otc.get_otc_cash_inflow()
+    hqla_change += otc_cash
     
     # 对冲端现金变动
     for hedge in hedge_list:
@@ -552,11 +668,11 @@ def calc_lcr_impact(client: ClientContract, hedge_list: List[HedgeTrade]) -> Dic
         hqla_change -= trade_cash
     
     # 30日内到期现金流（简化）
-    if client.term_days <= 30:
-        if client.contract_type == "income_note":
-            cof_change += client.funds_raised or client.notional
-        elif client.contract_type == "swap":
-            cof_change += client.notional * (client.margin_rate or 10) / 100
+    if otc.term_days <= 30:
+        if otc.contract_type == "income_note":
+            cof_change += otc.funds_raised or otc.notional
+        elif otc.contract_type == "swap":
+            cof_change += otc.notional * (otc.margin_rate or 10) / 100
     
     return {
         "hqla_change": hqla_change,
@@ -564,29 +680,29 @@ def calc_lcr_impact(client: ClientContract, hedge_list: List[HedgeTrade]) -> Dic
     }
 
 
-def calc_nsfr_impact(client: ClientContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
+def calc_nsfr_impact(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
     """计算NSFR影响（万元）"""
     asf_change = 0.0
     rsf_change = 0.0
     
     # 收益凭证：期限>=1年，100%计入ASF
-    if client.contract_type == "income_note" and client.term_days >= 365:
-        asf_change += client.funds_raised or client.notional
+    if otc.contract_type == "income_note" and otc.term_days >= 365:
+        asf_change += otc.funds_raised or otc.notional
     
     # 互换保证金：期限>=1年，按50%计入
-    if client.contract_type == "swap" and client.term_days >= 365:
-        asf_change += client.notional * (client.margin_rate or 10) / 100 * 0.5
+    if otc.contract_type == "swap" and otc.term_days >= 365:
+        asf_change += otc.notional * (otc.margin_rate or 10) / 100 * 0.5
     
-    # 客户端所需稳定资金
-    if client.contract_type == "option":
-        if client.direction == "buy":
-            premium = client.notional * (client.premium_rate or 5) / 100
+    # 场外合约所需稳定资金
+    if otc.contract_type == "option":
+        if otc.direction == "buy":
+            premium = otc.notional * (otc.premium_rate or 5) / 100
             rsf_change += premium
         else:
-            rsf_change += client.notional * 0.30
+            rsf_change += otc.notional * 0.30
     
-    elif client.contract_type == "swap":
-        rsf_change += client.notional * 0.01
+    elif otc.contract_type == "swap":
+        rsf_change += otc.notional * 0.01
     
     # 对冲端所需稳定资金
     for hedge in hedge_list:
@@ -600,28 +716,28 @@ def calc_nsfr_impact(client: ClientContract, hedge_list: List[HedgeTrade]) -> Di
     return {"asf_change": asf_change, "rsf_change": rsf_change}
 
 
-def analyze_contract(client: ClientContract, hedge_list: List[HedgeTrade]) -> Dict[str, Any]:
+def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, Any]:
     """主分析函数"""
     # 现金流
-    client_cash = client.get_client_cash_inflow()
+    otc_cash = otc.get_otc_cash_inflow()
     total_trade_cash = sum(h.get_trade_cash_outflow() for h in hedge_list)
-    net_day1_cash = client_cash - total_trade_cash
-    expected_income = client.get_expected_income()
+    net_day1_cash = otc_cash - total_trade_cash
+    expected_income = otc.get_expected_income()
     
     # 对冲有效性
-    is_effective = is_effective_hedge(client, hedge_list)
+    is_effective = is_effective_hedge(otc, hedge_list)
     
     # 风险资本准备
-    new_risk_reserve = calc_total_risk_reserve(client, hedge_list, is_effective)
+    new_risk_reserve = calc_total_risk_reserve(otc, hedge_list, is_effective[0])
     
     # LCR影响
-    lcr = calc_lcr_impact(client, hedge_list)
+    lcr = calc_lcr_impact(otc, hedge_list)
     
     # NSFR影响
-    nsfr = calc_nsfr_impact(client, hedge_list)
+    nsfr = calc_nsfr_impact(otc, hedge_list)
     
     # 表内外资产总额变动
-    new_assets = client.notional * 0.10 + sum(h.notional * 0.10 for h in hedge_list)
+    new_assets = otc.notional * 0.10 + sum(h.notional * 0.10 for h in hedge_list)
     
     # 核心指标变动
     hqla_new = DEFAULT_CONFIG["firm"]["HQLA_base"] / 10000 + lcr["hqla_change"]
@@ -663,20 +779,29 @@ def analyze_contract(client: ClientContract, hedge_list: List[HedgeTrade]) -> Di
     }
 
 
-client_product = ClientContract(
-    contract_type = "put_option",
-    direction = "short",
-    notional = 100000,
-    underlying_type = "Index",
-    underlying_name = "中证1000",
-    underlying_code = "000852"
+# ===================== 测试用例 =====================
+if __name__ == "__main__":
+    otc = OtcContract(
+        contract_type="put_option",
+        direction="short",
+        notional=100000,
+        underlying_type="Index",
+        underlying_name="中证1000",
+        underlying_code="000852"
     )
-hedge_list = [HedgeTrade(tool_type = "onsite_option", 
-                         direction = "long", 
-                         notional = 50000, 
-                         underlying_type = "Index", 
-                         underlying_name = "中证1000", 
-                         underlying_code = "000852", 
-                         option_delta = 0.95)]
-is_effective = is_effective_hedge(client_product, hedge_list)
-print(is_effective)
+    hedge_list = [
+        HedgeTrade(
+            tool_type="onsite_option",
+            direction="long",
+            notional=50000,
+            underlying_type="Index",
+            underlying_name="中证1000",
+            underlying_code="000852",
+            option_delta=0.95
+        )
+    ]
+    is_effective = is_effective_hedge(otc, hedge_list)
+    print(is_effective)
+
+    d = get_underlying_price_series('000852.SH', 'close')
+    print(d)
