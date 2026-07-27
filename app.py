@@ -8,13 +8,47 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from backend import ClientContract, HedgeTrade, analyze_contract, DEFAULT_CONFIG
 
+# ========== 公共工具函数 ==========
+
+def validate_option_delta(direction, option_type_str, delta_value):
+    """
+    校验期权 Delta 符号是否正确。
+    
+    参数:
+        direction: 交易方向，如 "买入"/"卖出"/"多头"/"空头"
+        option_type_str: 期权类型，如 "看涨期权"/"看跌期权"
+        delta_value: Delta 数值（%）
+    
+    返回:
+        (is_valid: bool, message: str)
+    """
+    if delta_value is None or delta_value == 0:
+        return False, "⚠️ **Delta 值不能为 0**，请填写有效的 Delta 金额。"
+    
+    # 定义期望的 Delta 符号映射
+    expected_sign_map = {
+        ("买入", "看涨期权"): "正",
+        ("卖出", "看涨期权"): "负",
+        ("买入", "看跌期权"): "负",
+        ("卖出", "看跌期权"): "正",
+    }
+    expected = expected_sign_map.get((direction, option_type_str), "未知")
+    
+    is_positive = delta_value > 0
+    if expected == "正" and not is_positive:
+        return False, f"⚠️ **Delta 符号警告**：{direction}{option_type_str}的 Delta 应为 **正数**，当前为负数。请检查是否填错。"
+    elif expected == "负" and is_positive:
+        return False, f"⚠️ **Delta 符号警告**：{direction}{option_type_str}的 Delta 应为 **负数**，当前为正数。请检查是否填错。"
+    else:
+        return True, "✅ Delta 符号正确"
+
 st.set_page_config(page_title="场外衍生品风控影响测算系统", layout="wide")
-st.title("📊 场外衍生品业务风控影响测算系统")
+st.title("场外衍生品业务风控影响测算系统")
 st.markdown("---")
 
 # ========== 侧边栏 ==========
 with st.sidebar:
-    st.header("⚙️ 公司基准参数")
+    st.header("公司基准参数")
     st.session_state['firm_params'] = {
         "HQLA_base": st.number_input("当前HQLA总额（万元）", value=DEFAULT_CONFIG["firm"]["HQLA_base"]/10000, step=10000.00),
         "LCR_COF_base": st.number_input("当前LCR未来30日净流出（万元）", value=DEFAULT_CONFIG["firm"]["LCR_COF_base"]/10000, step=10000.00),
@@ -26,10 +60,10 @@ with st.sidebar:
     }
 
 # ========== 主区域 ==========
-tab1, tab2, tab3 = st.tabs(["📝 模块A：客户端", "🔄 模块B：交易端", "📈 结果展示"])
+tab1, tab2, tab3 = st.tabs(["📝 模块A：场内合约端", "🔄 模块B：交易端（对冲工具）", "📈 结果展示"])
 
 with tab1:
-    st.subheader("客户端业务要素")
+    st.subheader("场内合约端业务要素")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -37,27 +71,11 @@ with tab1:
         direction = st.selectbox("交易方向", ["买入", "卖出"] if contract_type != "收益互换" else ["多头", "空头"])
         notional = st.number_input("名义本金/发行规模（万元）", min_value=0.0, value=1000.0, step=100.0)
         
-        # 标的资产属性
-        underlying_type_input = st.selectbox(
-            "标的资产属性",
-            ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
-            help="沪深300、中证500、上证180、深证100成分股或宽基ETF选「指数成分股」"
-        )
-        underlying_map = {
-            "指数成分股": "index_component",
-            "一般上市公司股票": "general_stock",
-            "流动受限股票": "restricted_stock",
-            "其他股票": "other_stock",
-        }
-        underlying_type = underlying_map[underlying_type_input]
-        underlying_name = st.text_input("标的资产名称", value="沪深300")
-        underlying_code = st.text_input("标的资产代码", value="000300")
-        
         # 预期收益与期限
-        st.caption("💡 提示：预期年化收益率与合约期限应根据业务需求合理设置")
+        st.caption("提示：预期年化收益率与合约期限应根据业务需求合理设置")
         expected_yield = st.number_input("预期年化收益率（%）", min_value=0.0, value=8.0, step=0.5) / 100.0
 
-        st.caption("📅 请设置合约期限")
+        st.caption("请设置合约期限")
         use_date_picker = st.checkbox(
             "手动选择到期日和起始日", 
             value=False,
@@ -95,7 +113,8 @@ with tab1:
         margin_rate = None
         funds_raised = None
         stress_loss = None
-        option_delta_for_client = None
+        option_delta = None
+        underlying_type = "index_component"  # 场外期权/收益凭证默认；收益互换由checkbox覆盖
         if "期权" in contract_type:
             client_option_type = st.selectbox("期权类型", ["看涨期权", "看跌期权"])
             premium_rate = st.number_input("权利金比例（%）", min_value=0.0, value=5.0, step=0.5)
@@ -110,38 +129,20 @@ with tab1:
             option_delta = st.number_input("Delta(%)", value=suggested_delta, key="client_option_delta", 
                                            help="Delta = 期权价格对标的资产价格的敏感度。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。")
             # ========== Delta 符号校验 ==========
-            # 定义期望的 Delta 符号
+            delta_valid, delta_warning_msg = validate_option_delta(direction, client_option_type, option_delta)
             expected_sign_map = {
-                ("买入", "看涨期权"): "正",   # 买入看涨 → Delta 应为正
-                ("卖出", "看涨期权"): "负",   # 卖出看涨 → Delta 应为负
-                ("买入", "看跌期权"): "负",   # 买入看跌 → Delta 应为负
-                ("卖出", "看跌期权"): "正",   # 卖出看跌 → Delta 应为正
+                ("买入", "看涨期权"): "正",
+                ("卖出", "看涨期权"): "负",
+                ("买入", "看跌期权"): "负",
+                ("卖出", "看跌期权"): "正",
             }
-            expected = expected_sign_map.get((direction, client_option_type), "未知")  # 找不到对应方向和类型的delta符号映射，显示未知
-                
-            # 检查 Delta 是否与期望一致
-            if option_delta is not None and option_delta != 0:
-                is_positive = option_delta > 0
-                if expected == "正" and not is_positive:
-                    delta_valid = False
-                    delta_warning_msg = f"⚠️ **Delta 符号警告**：{direction}{client_option_type}的 Delta 应为 **正数**，当前为负数。请检查是否填错。"
-                elif expected == "负" and is_positive:
-                    delta_valid = False
-                    delta_warning_msg = f"⚠️ **Delta 符号警告**：{direction}{client_option_type}的 Delta 应为 **负数**，当前为正数。请检查是否填错。"
-                else:
-                    delta_valid = True
-                    delta_warning_msg = "✅ Delta 符号正确"
-            else:
-                delta_valid = False
-                delta_warning_msg = "⚠️ **Delta 值不能为 0**，请填写有效的 Delta 金额。"
-                
-                # 显示校验结果
+            expected = expected_sign_map.get((direction, client_option_type), "未知")
             if delta_valid:
                 st.success(delta_warning_msg)
             else:
                 st.error(delta_warning_msg)
 
-            st.caption(f"💡 提示：{direction}{client_option_type}的 Delta 期望符号为 **{expected}**")
+            st.caption(f"提示：{direction}{client_option_type}的 Delta 期望符号为 **{expected}**")
             if direction == "卖出": 
                 st.caption("📌 压力损失 = 标的资产价格±20%的极端情况下，当前期权持仓的最大亏损")
                 stress_loss = st.number_input("压力损失（万元）", value=notional * 0.1, step=10.0)
@@ -149,6 +150,13 @@ with tab1:
         
         elif contract_type == "收益互换":
             margin_rate = st.number_input("保证金/预付金比例（%）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
+            # 标的资产属性仅用于收益互换的惩罚条件B（个股标的）
+            is_individual_stock = st.checkbox(
+                "标的资产为境内个股（非宽基/非指数成分股）",
+                value=False,
+                help="勾选后触发惩罚条件B：市场风险资本准备加倍。标的资产分类详情见模块B。"
+            )
+            underlying_type = "general_stock" if is_individual_stock else "index_component"
             delta_amount = None
             stress_loss = None
         
@@ -157,18 +165,18 @@ with tab1:
             delta_amount = None
             stress_loss = None
     
-    # 存储客户端参数
+    # 存储合约端参数
     st.session_state['client_params'] = {
         "contract_type": contract_type,
         "direction": direction,
         "notional": notional,
         "underlying_type": underlying_type,
-        "underlying_name": underlying_name,
-        "underlying_code": underlying_code,
+        "underlying_name": "",
+        "underlying_code": "",
         "premium_rate": premium_rate,
         "margin_rate": margin_rate,
         "funds_raised": funds_raised,
-        "option_delta": option_delta_for_client,
+        "option_delta": option_delta,
         "stress_loss": stress_loss,
         "expected_yield": expected_yield,
         "begin_date": begin_date.isoformat() if begin_date else None,
@@ -178,6 +186,18 @@ with tab1:
 
 with tab2:
     st.subheader("对冲工具列表")
+    
+    with st.expander("📋 标的资产分类"):
+        st.markdown("""
+        | 资产分类（下拉选项） | 适用范围 | 股票RSF | ETF RSF | HQLA折算率 |
+        |---------|------|--------|--------|-----------|
+        | **指数成分股** | 沪深300/中证500/上证180/深证100成分股、宽基ETF | 30% | 10% | 50% |
+        | **一般上市公司股票** | 非指数成分股的普通股票、非宽基ETF | 50% | 50% | 0% |
+        | **流动受限股票** | 限售股等 | 100% | — | 0% |
+        | **其他股票** | 上述之外的股票 | 100% | — | 0% |
+        """)
+        st.caption("提示：系统根据「工具类型」自动区分股票与ETF，在同一分类下应用各自的RSF系数。")
+    
     if 'hedge_tools' not in st.session_state:
         st.session_state['hedge_tools'] = []
     
@@ -195,19 +215,27 @@ with tab2:
         with col2:
             cash_spent = futures_margin = option_premium = option_delta = otc_payment = subscription_amount = None
             pass_through_fee = None
+            delta_valid = True  # 非期权工具默认通过校验
+            stock_type_value = None  # ETF/个股的标的资产分类，通过下方下拉框赋值
             
             if tool_type == "ETF现货":
                 cash_spent = st.number_input("资金消耗（万元）", value=tool_notional)
+                stock_type_value = st.selectbox(
+                    "标的资产分类",
+                    ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
+                    key="etf_stock_type",
+                    help="参见上方「标的资产分类」表格。宽基ETF选「指数成分股」RSF=10%；非宽基ETF选「一般上市公司股票」RSF=50%"
+                )
                 st.caption("基金名称和代码均为选填，用于有效对冲判定，若不填则按照最保守方式估计风控指标")
                 etf_name = st.text_input("ETF名称")
                 etf_code = st.text_input("ETF代码")
 
             
             elif tool_type == "个股":
-                st.caption("💡 提示：一次仅能添加一支股票，如用一揽子股票对冲，需分别添加")
-                tool_type = st.selectbox("股票类型",
+                st.caption("提示：一次仅能添加一支股票，如用一揽子股票对冲，需分别添加")
+                stock_type_value = st.selectbox("标的资产分类",
                 ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
-                key="stock_type")
+                key="stock_stock_type")
                 st.caption("股票名称和代码均为选填，用于有效对冲判定，若不填则按照最保守方式估计风控指标")
                 stock_name = st.text_input("股票名称")
                 stock_code = st.text_input("股票代码")
@@ -245,38 +273,20 @@ with tab2:
                 )
                 
                 # ========== Delta 符号校验 ==========
-                # 定义期望的 Delta 符号
+                delta_valid, delta_warning_msg = validate_option_delta(tool_direction, option_type, option_delta)
                 expected_sign_map = {
-                    ("买入", "看涨期权"): "正",   # 买入看涨 → Delta 应为正
-                    ("卖出", "看涨期权"): "负",   # 卖出看涨 → Delta 应为负
-                    ("买入", "看跌期权"): "负",   # 买入看跌 → Delta 应为负
-                    ("卖出", "看跌期权"): "正",   # 卖出看跌 → Delta 应为正
+                    ("买入", "看涨期权"): "正",
+                    ("卖出", "看涨期权"): "负",
+                    ("买入", "看跌期权"): "负",
+                    ("卖出", "看跌期权"): "正",
                 }
-                expected = expected_sign_map.get((tool_direction, option_type), "未知")  # 找不到对应方向和类型的delta符号映射，显示未知
-                
-                # 检查 Delta 是否与期望一致
-                if option_delta is not None and option_delta != 0:
-                    is_positive = option_delta > 0
-                    if expected == "正" and not is_positive:
-                        delta_valid = False
-                        delta_warning_msg = f"⚠️ **Delta 符号警告**：{tool_direction}{option_type}的 Delta 应为 **正数**，当前为负数。请检查是否填错。"
-                    elif expected == "负" and is_positive:
-                        delta_valid = False
-                        delta_warning_msg = f"⚠️ **Delta 符号警告**：{tool_direction}{option_type}的 Delta 应为 **负数**，当前为正数。请检查是否填错。"
-                    else:
-                        delta_valid = True
-                        delta_warning_msg = "✅ Delta 符号正确"
-                else:
-                    delta_valid = False
-                    delta_warning_msg = "⚠️ **Delta 值不能为 0**，请填写有效的 Delta 金额。"
-                
-                # 显示校验结果
+                expected = expected_sign_map.get((tool_direction, option_type), "未知")
                 if delta_valid:
                     st.success(delta_warning_msg)
                 else:
                     st.error(delta_warning_msg)
 
-                st.caption(f"💡 提示：{tool_direction}{option_type}的 Delta 期望符号为 **{expected}**")
+                st.caption(f"提示：{tool_direction}{option_type}的 Delta 期望符号为 **{expected}**")
             
             elif tool_type == "场外背对背对冲":
                 otc_payment = st.number_input("向平盘方支付预付金（万元）", value=0.0)
@@ -300,7 +310,8 @@ with tab2:
                 "otc_payment": otc_payment,
                 "pass_through_fee": pass_through_fee,
                 "subscription_amount": subscription_amount,
-                "option_type": option_type if tool_type == "场内标准化期权" else None,
+                "option_type": option_type if tool_type == "场内期权" else None,
+                "stock_type": stock_type_value,
             }
             st.session_state['hedge_tools'].append(hedge)
             st.success("✅ 对冲工具已添加")
@@ -318,11 +329,11 @@ with tab2:
         st.info("尚无对冲工具，请添加")
 
 with tab3:
-    st.subheader("📊 计算结果")
-    if st.button("🚀 计算业务影响", type="primary"):
+    st.subheader("计算结果")
+    if st.button("计算业务影响", type="primary"):
         cp = st.session_state.get('client_params')
         if not cp:
-            st.error("请先在「模块A：客户端」填写业务信息")
+            st.error("请先在「模块A：场内合约端」填写业务信息")
         else:
             client = ClientContract(**cp)
             hedge_list = [HedgeTrade(**h) for h in st.session_state.get('hedge_tools', [])]
@@ -372,7 +383,7 @@ with tab3:
             status_cols[1].write(f"NSFR: {'✅ 安全' if result['nsfr_status'] == 'safe' else '⚠️ 预警' if result['nsfr_status'] == 'warning' else '🚨 危险'}")
             status_cols[2].write(f"风险覆盖率: {'✅ 安全' if result['risk_coverage_status'] == 'safe' else '⚠️ 预警' if result['risk_coverage_status'] == 'warning' else '🚨 危险'}")
             
-            with st.expander("📄 查看详细明细"):
+            with st.expander("查看明细"):
                 st.json(result)
 
 st.markdown("---")
