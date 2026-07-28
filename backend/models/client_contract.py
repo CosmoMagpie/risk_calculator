@@ -54,6 +54,8 @@ class OtcContract:
     contract_size: Optional[float] = None       # 合约份数（份）
     exercise_price: Optional[float] = None      # 行权价（元）
     option_delta: Optional[float] = None        # Delta值（%），如0.5=50%，用于计算Delta敞口
+    option_margin_amount: Optional[float] = None # 场外卖出期权保证金绝对值（万元）
+    option_margin_rate: Optional[float] = None   # 场外卖出期权保证金比例（%）
     stress_loss: Optional[float] = None         # 压力测试最大损失（万元），卖出场外期权专用
 
     # ===== 收益互换专有字段 =====
@@ -138,6 +140,14 @@ class OtcContract:
         """获取压力测试最大损失"""
         return self.stress_loss
 
+    def get_option_margin_amount(self) -> Optional[float]:
+        """获取场外卖出期权保证金（万元）"""
+        return self.option_margin_amount
+
+    def get_option_margin_rate(self) -> Optional[float]:
+        """获取场外卖出期权保证金比例（%）"""
+        return self.option_margin_rate
+
     def get_margin_rate(self) -> Optional[float]:
         """获取互换保证金比例"""
         return self.margin_rate
@@ -159,8 +169,8 @@ class OtcContract:
         return self.income_certificate_delta
 
     def get_income_certificate_rate(self) -> Optional[float]:
-        """获取收益凭证票面利率（%）"""
-        return self.income_certificate_rate
+        """获取收益凭证票面利率（%），约定 > 硬编码"""
+        return DEFAULT_CONFIG["client"]["income_certificate_rate"]
 
     def get_expected_yield(self) -> float:
         """获取预期年化收益率"""

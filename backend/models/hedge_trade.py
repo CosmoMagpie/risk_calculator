@@ -55,6 +55,8 @@ class HedgeTrade:
     option_start_date: Optional[str] = None      # 期权起始日（"YYYY-MM-DD"）
     option_expiry_date: Optional[str] = None     # 期权到期日（"YYYY-MM-DD"）
     option_delta: Optional[float] = None         # Delta值（%）
+    option_margin: Optional[float] = None        # 场内卖出期权保证金金额（万元）
+    option_margin_rate: Optional[float] = None   # 场内卖出期权保证金比例（%）
 
     # ===== 场外背对背对冲字段 =====
     # 【业务场景】券商与客户做了一笔场外期权后，找另一家金融机构做一笔完全反向的交易
@@ -148,7 +150,7 @@ class HedgeTrade:
         """获取对冲工具底层资产名称"""
         return self.underlying_name
 
-    def get_tool_underlying_code(self) -> str:
+    def get_tool_underlying_code(self) -> Optional[str]:
         """获取对冲工具底层资产代码"""
         return self.underlying_code
 

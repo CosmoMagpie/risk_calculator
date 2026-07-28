@@ -11,6 +11,7 @@ DEFAULT_CONFIG = {
     "client": {
         "swap_margin_rate": 0.10,           # 收益互换默认保证金比例 10%（监管允许最低保证金）
         "option_premium_rate": 0.05,        # 场外期权默认权利金/名义本金比例 5%
+        "option_margin_rate": 0.20,         # 场外卖出期权默认保证金比例 20%
         "atm_option_delta": 0.50,           # 平值期权默认Delta（ATM = At-The-Money）
         "equity_swap_delta": 1.0,           # 互换默认Delta 100%（互换相当于直接持有标的）
         "income_certificate_delta": 0.0,     # 收益凭证默认Delta 0%（本质是固收产品，无权益敞口）
@@ -25,6 +26,7 @@ DEFAULT_CONFIG = {
         "private_fund_cash_rate": 1.0,      # 私募基金申购资金占用比例 100%
         "etf_cash_rate": 1.0,               # ETF现货资金消耗比例 100%（全款买入）
         "onsite_option_premium_rate": 0.02, # 场内期权默认权利金比例 2%
+        "onsite_option_margin_rate": 0.15,  # 场内卖出期权默认保证金比例 15%
         "otc_option_premium_rate": 0.03,    # 场外期权（背对背平盘）默认权利金比例 3%
         "atm_option_delta": 0.5,            # 场内外期权默认Delta值（平值期权≈0.5）
         "onsite_option_stress_loss": 0.0,   # 卖出压力测试最大损失（万元），默认0=未设置
@@ -35,6 +37,8 @@ DEFAULT_CONFIG = {
     #           先存储公司当前的各项基数，再叠加新业务变动，最后对比前后差异
     "firm": {
         "classification_factor": 1.0,           # 证监会对券商的分类评价系数（AAA=0.4, AA=0.6, A=0.8, B=0.9, C=1.0, D=2.0）
+        "asf_rating_factor": 0.00,              # NSFR ASF评级折算系数（AAA/AA=0.20, A=0.10, BBB及以下=0.00）
+                                                # 用于卖出期权权利金和收益凭证在 6月≤T<1年 的ASF折算
         "HQLA_base": 11_881_000_000,            # 当前优质流动性资产总额（元）—— LCR分子
         "LCR_COF_base": 7_977_000_000,          # 当前未来30日现金净流出（元）—— LCR分母
         "ASF_base": 30_532_000_000,             # 当前可用稳定资金总额（元）—— NSFR分子

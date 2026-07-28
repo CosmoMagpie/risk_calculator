@@ -4,6 +4,7 @@
 
 from typing import Dict, List
 
+from ..config import DEFAULT_CONFIG
 from ..models.client_contract import OtcContract
 from ..models.hedge_trade import HedgeTrade
 from .ratios import RSF_RATES
@@ -72,13 +73,13 @@ def _calc_option_nsfr(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[st
     asf_change = 0.0
     if otc.direction == "short":
         # 卖出期权收到的权利金，按合约期限折算为可用稳定资金
+        # T ≥ 1年 → 100%；6月 ≤ T < 1年 → 依公司评级折算（0%~20%）；T < 6月 → 0%
         premium = abs(otc.get_otc_cash_inflow())
         days = otc.term_days
         if days >= 365:
-            asf_change = premium * 1.00       # ≥1年：100%
+            asf_change = premium * 1.00
         elif days >= 180:
-            asf_change = premium * 0.00       # 6月~1年：依评级0~20%，保守取0%
-        # else: T < 6月：0%（默认）
+            asf_change = premium * DEFAULT_CONFIG["firm"]["asf_rating_factor"]
     # 买入期权：无 ASF（支付权利金属于资金使用，非资金来源）
 
     # --- ΔRSF（所需稳定资金增量）---
@@ -126,12 +127,13 @@ def _calc_income_cert_nsfr(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Di
     days = otc.term_days
 
     # --- ΔASF（按发行期限 T 提供稳定资金）---
+    # T ≥ 1年 → 100%；6月 ≤ T < 1年 → 依公司评级折算（0%~20%）；T < 6月 → 0%
     if days >= 365:
-        asf_change = V * 1.00          # ≥1年：100%
+        asf_change = V * 1.00
     elif days >= 180:
-        asf_change = V * 0.00          # 6月~1年：依评级0~20%，保守取0%
+        asf_change = V * DEFAULT_CONFIG["firm"]["asf_rating_factor"]
     else:
-        asf_change = 0.0               # <6月：0%
+        asf_change = 0.0
 
     # --- ΔRSF ---
     rsf_change = 0.0

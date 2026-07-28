@@ -339,49 +339,61 @@ with tab3:
             hedge_list = [HedgeTrade(**h) for h in st.session_state.get('hedge_tools', [])]
             result = analyze_contract(client, hedge_list)
             
-            # ===== 第一层：资源绝对消耗 =====
-            st.markdown("### 第一层：资源绝对消耗")
+            # ===== 第一层：现金流与资源消耗绝对值 =====
+            st.markdown("### 第一层：现金流与资源消耗绝对值")
             col1, col2, col3 = st.columns(3)
-            col1.metric("新增风险资本准备", f"{result['new_risk_reserve']:.2f} 万元")
-            col2.metric("新增表内外资产总额", f"{result['new_assets']:.2f} 万元")
-            col3.metric("新增未来30日现金净流出", f"{result['lcr_net_cof_change']:.2f} 万元")
+            col1.metric("首日净现金流", f"{result['net_day1_cash']:,.2f} 万元")
+            col2.metric("新增风险资本准备", f"{result['new_risk_reserve']:,.2f} 万元")
+            col3.metric("新增未来30日现金净流出", f"{result['net_cof_change']:,.2f} 万元")
             
-            # ===== 第二层：全局指标变动 =====
-            st.markdown("### 第二层：全局指标变动")
-            col1, col2, col3 = st.columns(3)
+            # ===== 第二层：核心风控指标边际变动 =====
+            st.markdown("### 第二层：核心风控指标边际变动")
+            col1, col2, col3, col4 = st.columns(4)
             
             lcr_delta = result['lcr_change']
             col1.metric("LCR", f"{result['lcr_new']:.2%}",
-                        delta=f"{lcr_delta:.2%}",
+                        delta=f"{lcr_delta:+.2%}",
                         delta_color="inverse" if lcr_delta < 0 else "normal")
-            col1.caption(f"原值: {result['lcr_old']:.2%} ｜ 预警线: 120%")
+            col1.caption(f"原值: {result['lcr_old']:.2%} ｜ ≥100%")
             
             nsfr_delta = result['nsfr_change']
             col2.metric("NSFR", f"{result['nsfr_new']:.2%}",
-                        delta=f"{nsfr_delta:.2%}",
+                        delta=f"{nsfr_delta:+.2%}",
                         delta_color="inverse" if nsfr_delta < 0 else "normal")
-            col2.caption(f"原值: {result['nsfr_old']:.2%} ｜ 预警线: 120%")
+            col2.caption(f"原值: {result['nsfr_old']:.2%} ｜ ≥100%")
+            
+            lev_delta = result['leverage_change']
+            col3.metric("资本杠杆率", f"{result['leverage_new']:.2%}",
+                        delta=f"{lev_delta:+.2%}",
+                        delta_color="inverse" if lev_delta < 0 else "normal")
+            col3.caption(f"原值: {result['leverage_old']:.2%} ｜ ≥8%")
             
             rc_delta = result['risk_coverage_change']
-            col3.metric("风险覆盖率", f"{result['risk_coverage_new']:.2%}",
-                        delta=f"{rc_delta:.2%}",
+            col4.metric("风险覆盖率", f"{result['risk_coverage_new']:.2%}",
+                        delta=f"{rc_delta:+.2%}",
                         delta_color="inverse" if rc_delta < 0 else "normal")
-            col3.caption(f"原值: {result['risk_coverage_old']:.2%} ｜ 预警线: 120%")
+            col4.caption(f"原值: {result['risk_coverage_old']:.2%} ｜ ≥100%")
             
-            # ===== 第三层：性价比 =====
-            st.markdown("### 第三层：性价比")
+            # ===== 第三层：动态性价比指标 =====
+            st.markdown("### 第三层：动态性价比指标")
             col1, col2, col3 = st.columns(3)
-            col1.metric("资本创收率", f"{result['ro_capital']:.2f} 元/元")
-            col2.metric("杠杆利用率", f"{result['ro_assets']:.2f} 元/元")
-            col3.metric("流动性创收率", f"{result['ro_lcr']:.2f} 元/元")
+            col1.metric("ROC 资本收益率", f"{result['roc']:.2f} 元/元",
+                        help="预期创收 / 新增风险资本准备")
+            col2.metric("RO-LCR 流动性创收率", f"{result['ro_lcr']:.2f} 元/元",
+                        help="预期创收 / max(0, Δ现金净流出 - ΔHQLA)")
+            col3.metric("RO-NSFR 稳定资金创收率", f"{result['ro_nsfr']:.2f} 元/元",
+                        help="预期创收 / Δ所需稳定资金")
             
             # 对冲有效性 & 合规状态
-            st.info(f"对冲有效性: {'✅ 有效对冲' if result['is_effective_hedge'] else '❌ 未达有效对冲'}")
+            st.info(f"对冲有效性: {'✅ 有效对冲' if result['is_effective_hedge'][0] else '❌ 未达有效对冲'}")
+            if not result['is_effective_hedge'][0]:
+                st.caption(f"原因: {result['is_effective_hedge'][1]}")
             
-            status_cols = st.columns(3)
+            status_cols = st.columns(4)
             status_cols[0].write(f"LCR: {'✅ 安全' if result['lcr_status'] == 'safe' else '⚠️ 预警' if result['lcr_status'] == 'warning' else '🚨 危险'}")
             status_cols[1].write(f"NSFR: {'✅ 安全' if result['nsfr_status'] == 'safe' else '⚠️ 预警' if result['nsfr_status'] == 'warning' else '🚨 危险'}")
-            status_cols[2].write(f"风险覆盖率: {'✅ 安全' if result['risk_coverage_status'] == 'safe' else '⚠️ 预警' if result['risk_coverage_status'] == 'warning' else '🚨 危险'}")
+            status_cols[2].write(f"资本杠杆率: {'✅ 安全' if result['leverage_status'] == 'safe' else '⚠️ 预警' if result['leverage_status'] == 'warning' else '🚨 危险'}")
+            status_cols[3].write(f"风险覆盖率: {'✅ 安全' if result['risk_coverage_status'] == 'safe' else '⚠️ 预警' if result['risk_coverage_status'] == 'warning' else '🚨 危险'}")
             
             with st.expander("查看明细"):
                 st.json(result)
