@@ -15,6 +15,7 @@ from backend.models.client_contract import OtcContract
 from backend.models.hedge_trade import HedgeTrade
 from backend.calculators.lcr import calc_lcr_impact, _calc_hedge_hqla
 from backend.calculators.nsfr import calc_nsfr_impact, _calc_hedge_rsf
+from backend.calculators.leverage import calc_leverage_impact
 from backend.calculators.risk_reserve import (
     calc_total_risk_reserve,
     _get_client_investment_scale,
@@ -379,6 +380,116 @@ def test_helpers():
 
 
 # ============================================================
+# 5. 资本杠杆率
+# ============================================================
+def test_leverage():
+    print("\n=== 资本杠杆率 ===")
+
+    # --- 场外期权：卖出看涨 + 期货对冲 ---
+    otc_opt = OtcContract(
+        contract_type="call_option", direction="short", notional=10000.0,
+        underlying_type="index_component", underlying_code="000300",
+        option_type="call_option", premium_rate=5.0, term_days=180,
+        stress_loss=200.0, expected_yield=0.08,
+    )
+    hedges = [
+        make_hedge(tool_type="futures", notional=8000.0, direction="short"),
+    ]
+    # net_day1_cash: 收权利金 500w - 期货保证金 8000×12%=960w = -460
+    lev = calc_leverage_impact(otc_opt, hedges, net_day1_cash=-460.0)
+    # Δ表内 = -460
+    # Δ表外_client = S_short = max(5×200, 10000×0.5%) = 1000
+    # Δ表外_hedge = 期货 8000×15% = 1200
+    # total = -460 + 1000 + 1200 = 1740
+    check("Leverage option short+futures", abs(lev - 1740.0) < 0.01, f"got {lev}")
+
+    # 买入期权：表外=0
+    otc_buy = OtcContract(
+        contract_type="put_option", direction="buy", notional=10000.0,
+        underlying_type="index_component", underlying_code="000300",
+        option_type="put_option", premium_rate=3.0,
+    )
+    lev2 = calc_leverage_impact(otc_buy, [], net_day1_cash=-300.0)
+    # Δ表内 = -300, Δ表外 = 0 → total = -300
+    check("Leverage buy option = 0 off-balance", abs(lev2 - (-300.0)) < 0.01, f"got {lev2}")
+
+    # --- 收益互换：非全额+个股（惩罚）---
+    otc_swap = OtcContract(
+        contract_type="equity_swap", direction="short", notional=20000.0,
+        underlying_type="general_stock", underlying_code="600519",
+        margin_rate=10.0, term_days=365, expected_yield=0.06,
+    )
+    lev3 = calc_leverage_impact(otc_swap, [], net_day1_cash=2000.0)
+    # Δ表内 = +2000 (收保证金)
+    # Δ表外_client = N×10%×2 = 20000×20% = 4000
+    # total = 6000
+    check("Leverage swap penalty", abs(lev3 - 6000.0) < 0.01, f"got {lev3}")
+
+    # 无惩罚（指数成分股）
+    otc_swap2 = OtcContract(
+        contract_type="equity_swap", direction="short", notional=20000.0,
+        underlying_type="index_component", underlying_code="000300",
+        margin_rate=10.0, term_days=365, expected_yield=0.06,
+    )
+    lev4 = calc_leverage_impact(otc_swap2, [], net_day1_cash=2000.0)
+    # Δ表外_client = N×10% = 2000 → total = 4000
+    check("Leverage swap no penalty", abs(lev4 - 4000.0) < 0.01, f"got {lev4}")
+
+    # 互换 + OTC hedge
+    lev5 = calc_leverage_impact(otc_swap2, [make_hedge(tool_type="otc_hedge", notional=15000.0)],
+                                net_day1_cash=500.0)
+    # Δ表内 = 500
+    # Δ表外_client = 2000, Δ表外_hedge = 15000×10% = 1500
+    # total = 4000
+    check("Leverage swap + OTC hedge", abs(lev5 - 4000.0) < 0.01, f"got {lev5}")
+
+    # --- 收益凭证：固定型（表外=0）---
+    otc_fixed = OtcContract(
+        contract_type="income_certificate", direction="short", notional=50000.0,
+        underlying_type="general_stock", underlying_code="000001",
+        funds_raised=50000.0, term_days=60, stress_loss=None,
+    )
+    lev6 = calc_leverage_impact(otc_fixed, [], net_day1_cash=50000.0)
+    # Δ表内 = +50000, Δ表外 = 0 → total = 50000
+    check("Leverage fixed cert", abs(lev6 - 50000.0) < 0.01, f"got {lev6}")
+
+    # 浮动型
+    otc_float = OtcContract(
+        contract_type="income_certificate", direction="short", notional=50000.0,
+        underlying_type="index_component", underlying_code="000300",
+        funds_raised=50000.0, term_days=90, stress_loss=300.0,
+    )
+    lev7 = calc_leverage_impact(otc_float, [
+        make_hedge(tool_type="futures", notional=30000.0),
+    ], net_day1_cash=46400.0)
+    # Δ表内 = 46400 (50000 - 30000×12%)
+    # Δ表外_client = S_short = max(5×300, 50000×0.5%) = 1500
+    # Δ表外_hedge = 期货 30000×15% = 4500
+    # total = 46400 + 1500 + 4500 = 52400
+    check("Leverage floating cert + futures", abs(lev7 - 52400.0) < 0.01, f"got {lev7}")
+
+    # 场内卖出期权对冲
+    lev8 = calc_leverage_impact(otc_opt, [
+        make_hedge(tool_type="onsite_option", notional=6000.0, direction="short",
+                   option_delta=0.5),
+    ], net_day1_cash=0.0)
+    # Δ表内 = 0 (假设)
+    # Δ表外_client = 1000 (S_short)
+    # Δ表外_hedge = 6000 × 0.5 × 15% = 450
+    # total = 1450
+    check("Leverage option + onsite short", abs(lev8 - 1450.0) < 0.01, f"got {lev8}")
+
+    # 场内买入期权：表外=0
+    lev9 = calc_leverage_impact(otc_opt, [
+        make_hedge(tool_type="onsite_option", notional=6000.0, direction="long",
+                   option_delta=0.5),
+    ], net_day1_cash=0.0)
+    # Δ表外_hedge = 0 (买入期权不计)
+    # total = 1000 + 0 + 0 = 1000
+    check("Leverage option + onsite long", abs(lev9 - 1000.0) < 0.01, f"got {lev9}")
+
+
+# ============================================================
 # 运行
 # ============================================================
 if __name__ == "__main__":
@@ -390,6 +501,7 @@ if __name__ == "__main__":
     test_swap()
     test_income_cert()
     test_helpers()
+    test_leverage()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

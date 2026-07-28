@@ -14,5 +14,4 @@ __all__ = [
     "HedgeTrade",
     "analyze_contract",
     "DEFAULT_CONFIG",
-    "validate_option_delta",
 ]

@@ -11,6 +11,7 @@ from .calculators.hedge_validator import is_effective_hedge
 from .calculators.risk_reserve import calc_total_risk_reserve
 from .calculators.lcr import calc_lcr_impact
 from .calculators.nsfr import calc_nsfr_impact
+from .calculators.leverage import calc_leverage_impact
 
 
 def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, Any]:
@@ -49,10 +50,10 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     # ===== 步骤5：NSFR影响 =====
     nsfr = calc_nsfr_impact(otc, hedge_list)
 
-    # ===== 步骤6：表内外资产总额变动（简化：名义本金的10%）=====
-    new_assets = otc.notional * 0.10 + sum(h.notional * 0.10 for h in hedge_list)
+    # ===== 步骤6：资本杠杆率影响 =====
+    assets_change = calc_leverage_impact(otc, hedge_list, net_day1_cash)
 
-    # ===== 步骤7：计算三大指标的前后对比 =====
+    # ===== 步骤7：计算四大指标的前后对比 =====
 
     # --- LCR ---
     # HQLA_new = 基准HQLA(元→万元) + 变动(万元)
@@ -67,6 +68,13 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     nsfr_new = asf_new / rsf_new if rsf_new > 0 else 999
     nsfr_old = (DEFAULT_CONFIG["firm"]["ASF_base"] / 10000) / (DEFAULT_CONFIG["firm"]["RSF_base"] / 10000)
 
+    # --- 资本杠杆率 ---
+    # 杠杆率 = 核心净资本 / 表内外资产总额 ≥ 8%
+    nc = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000
+    ta_base = DEFAULT_CONFIG["firm"]["on_off_balance_total_asset_base"] / 10000
+    leverage_old = nc / ta_base if ta_base > 0 else 999
+    leverage_new = nc / (ta_base + assets_change) if (ta_base + assets_change) > 0 else 999
+
     # --- 风险覆盖率 ---
     risk_reserve_new = DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000 + new_risk_reserve
     risk_old = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000 / (DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000)
@@ -80,7 +88,7 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
 
         # 风险资本准备与表内外资产
         "new_risk_reserve": new_risk_reserve,         # 新增风险资本准备（万元）
-        "new_assets": new_assets,                     # 新增表内外资产（万元）
+        "new_assets": assets_change,                  # 新增表内外资产总额（万元）
 
         # LCR 指标
         "lcr_net_cof_change": lcr["net_cof_change"],  # LCR分母变动
@@ -95,6 +103,12 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
         "nsfr_change": nsfr_new - nsfr_old,
         "nsfr_status": "safe" if nsfr_new >= 1.20 else "warning" if nsfr_new >= 1.00 else "danger",
 
+        # 资本杠杆率 指标
+        "leverage_old": leverage_old,
+        "leverage_new": leverage_new,
+        "leverage_change": leverage_new - leverage_old,
+        "leverage_status": "safe" if leverage_new >= 0.12 else "warning" if leverage_new >= 0.08 else "danger",
+
         # 风险覆盖率 指标
         "risk_coverage_old": risk_old,
         "risk_coverage_new": risk_new,
@@ -104,8 +118,9 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
         # 性价比指标（创收 / 指标消耗）
         # RO_* = Return On *，衡量每消耗1单位指标能创造多少收入
         "ro_capital": expected_income / new_risk_reserve if new_risk_reserve > 0 else 999,
-        "ro_assets": expected_income / new_assets if new_assets > 0 else 999,
-        "ro_lcr": expected_income / abs(lcr["net_cof_change"]) if lcr["net_cof_change"] != 0 else 999,
+        "ro_assets": expected_income / assets_change if assets_change > 0 else 999,
+        "ro_lcr": expected_income / max(0, lcr["net_cof_change"] - lcr["hqla_change"]) if (lcr["net_cof_change"] - lcr["hqla_change"]) > 0 else 999,
+        "ro_nsfr": expected_income / nsfr["rsf_change"] if nsfr["rsf_change"] > 0 else 999,
 
         # 对冲有效性标记
         "is_effective_hedge": is_effective,
