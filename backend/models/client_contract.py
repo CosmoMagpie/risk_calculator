@@ -265,26 +265,27 @@ class OtcContract:
 
         【Python语法】is_long = 1 if ... else -1 是简洁的方向符号赋值
         """
-        is_long = 1 if self.direction == "long" else -1  # 多头=+1, 空头=-1
+        # 方向归一化：期权用 buy/short，互换/凭证用 long/short
+        is_long = 1 if self.direction in ("long", "buy") else -1
 
         # --- 期权Delta ---
         if "option" in self.contract_type:
             is_call = 1 if self.option_type == "call_option" else -1  # 看涨=+1, 看跌=-1
             if self.option_delta is not None:
-                return self.option_delta * self.notional
+                return self.option_delta * self.notional * is_call * is_long
             # 默认使用平值期权Delta=0.5，乘以 call/put 和 long/short 方向
             return DEFAULT_CONFIG["client"]["atm_option_delta"] * self.notional * is_call * is_long
 
         # --- 互换Delta ---
         elif "swap" in self.contract_type:
             if self.equity_swap_delta is not None:
-                return self.equity_swap_delta * self.notional
+                return self.equity_swap_delta * self.notional * is_long
             return DEFAULT_CONFIG["client"]["equity_swap_delta"] * self.notional * is_long
 
         # --- 收益凭证Delta（默认0，固收产品无权益敞口）---
         elif "income_certificate" in self.contract_type:
             if self.income_certificate_delta is not None:
-                return self.income_certificate_delta * self.notional
+                return self.income_certificate_delta * self.notional * is_long
             return DEFAULT_CONFIG["client"]["income_certificate_delta"] * self.notional * is_long
 
         return 0.0

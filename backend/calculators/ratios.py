@@ -14,7 +14,7 @@ RATES = {
     "stock_index_future": 0.30,   # 股指期货 30%
     "equity_swap": 0.30,          # 权益互换 30%
     "equity_short_option": 0.30,  # 权益类卖出期权 30%
-    "equtity_long_option": 1.00,  # 权益类买入期权 100%（注意拼写：equtity→equity）
+    "equtity_long_option": 1.00,  # 权益类买入期权 100%
     "monetary_fund": 0.05,        # 货币基金 5%
     "interest_rate_bond_index_fund": 0.06, # 利率债指数基金 6%
     "other_non_equity_fund": 0.10,  # 其他非权益类基金

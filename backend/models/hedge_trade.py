@@ -165,14 +165,13 @@ class HedgeTrade:
         if self.tool_type == "onsite_option":
             is_call = 1 if self.option_type == "call_option" else -1
             if self.option_delta is not None:
-                return self.option_delta * self.notional
-            # ⚠️ 注意："onsite_option_delta" key 在 DEFAULT_CONFIG["trade"] 中不存在，实际key是 "atm_option_delta"
-            return DEFAULT_CONFIG["trade"]["onsite_option_delta"] * self.notional * is_call * is_long
+                return self.option_delta * self.notional * is_call * is_long
+            return DEFAULT_CONFIG["trade"]["atm_option_delta"] * self.notional * is_call * is_long
 
         # --- 期货Delta ---
         elif "futures" in self.tool_type:
             if self.future_delta is not None:
-                return self.future_delta * self.notional
+                return self.future_delta * self.notional * is_long
             return DEFAULT_CONFIG["trade"]["future_delta"] * self.notional * is_long
 
         # --- ETF/股票：Delta直接等于名义价值 ---
