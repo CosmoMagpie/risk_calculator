@@ -4,11 +4,16 @@
 
 from typing import List
 
+from ..services.ifind_client import get_underlying_spot_price
 from ..models.client_contract import OtcContract
 from ..models.hedge_trade import HedgeTrade
 from ..config import DEFAULT_CONFIG
 from .ratios import RATES
 
+def short_otc_invest_size(otc: OtcContract) -> float:
+    '''计算卖出场外期权的投资规模
+    【计算方法】：5倍压力损失与名义本金的0.5%孰高法，其中压力损失为标的现货价格
+    '''
 
 def calc_market_risk_reserve(otc: OtcContract, hedge_list: List[HedgeTrade], is_hedge_effective: bool) -> float:
     """

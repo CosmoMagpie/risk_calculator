@@ -41,7 +41,6 @@ def is_effective_hedge(otc: OtcContract, hedge_list: List[HedgeTrade], price_typ
     if not hedge_tool_underlying_codes:
         return [False, "未填写对冲工具标的代码，默认不满足有效对冲条件"]
 
-    # 子条件1.1：任一工具的标的代码与场外合约相同即为"同一标的"
     underlying_is_same = any(otc_underlying_code == h_code for h_code in hedge_tool_underlying_codes)
 
     # ========== 条件1.2：判断标的物过去一年价格相关性 ≥ 95% ==========

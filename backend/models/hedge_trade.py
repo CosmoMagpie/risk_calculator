@@ -55,6 +55,8 @@ class HedgeTrade:
     option_start_date: Optional[str] = None      # 期权起始日（"YYYY-MM-DD"）
     option_expiry_date: Optional[str] = None     # 期权到期日（"YYYY-MM-DD"）
     option_delta: Optional[float] = None         # Delta值（%）
+    option_margin: Optional[float] = None        # 期权保证金金额（万元），卖出期权时需要缴纳保证金
+    option_margin_rate: Optional[float] = None   # 期权保证金比例（%）
 
     # ===== 场外背对背对冲字段 =====
     # 【业务场景】券商与客户做了一笔场外期权后，找另一家金融机构做一笔完全反向的交易
@@ -152,6 +154,62 @@ class HedgeTrade:
         """获取对冲工具底层资产代码"""
         return self.underlying_code
 
+    def get_cash_spent(self) -> Optional[float]:
+        """获取ETF买入实际花费现金（万元）"""
+        return self.cash_spent
+
+    def get_futures_margin(self) -> Optional[float]:
+        """获取期货保证金金额（万元）"""
+        return self.futures_margin
+
+    def get_futures_margin_rate(self) -> Optional[float]:
+        """获取期货保证金比例（%）"""
+        return self.futures_margin_rate
+    
+    def get_option_premium(self) -> Optional[float]:
+        """获取期权权利金（万元）"""
+        return self.option_premium
+
+    def get_option_type(self) -> Optional[str]:
+        """获取期权类型"""
+        return self.option_type
+
+    def get_option_strike_price(self) -> Optional[float]:
+        """获取期权执行价（元）"""
+        return self.option_strike_price
+
+    def get_option_start_date(self) -> Optional[str]:
+        """获取期权起始日（"YYYY-MM-DD"）"""
+        return self.option_start_date
+
+    def get_option_expiry_date(self) -> Optional[str]:
+        """获取期权到期日（"YYYY-MM-DD"）"""
+        return self.option_expiry_date
+
+    def get_option_delta(self) -> Optional[float]:
+        """获取期权Delta值（%）"""
+        return self.option_delta
+
+    def get_option_margin(self) -> Optional[float]:
+        """获取期权保证金金额（万元）"""
+        return self.option_margin
+
+    def get_option_margin_rate(self) -> Optional[float]:
+        """获取期权保证金比例（%）"""
+        return self.option_margin_rate
+
+    def get_otc_payment(self) -> Optional[float]:
+        """获取场外背对背对冲预付金（万元）"""
+        return self.otc_payment
+
+    def get_pass_through_fee(self) -> Optional[float]:
+        """获取场外背对背对冲平盘成本（年化%）"""
+        return self.pass_through_fee
+
+    def get_subscription_amount(self) -> Optional[float]:
+        """获取私募基金申购金额（万元）"""
+        return self.subscription_amount
+    
     def get_hedge_delta_amount(self) -> Optional[float]:
         """
         获取对冲工具的Delta敞口金额（万元）

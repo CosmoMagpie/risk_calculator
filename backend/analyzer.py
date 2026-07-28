@@ -11,6 +11,7 @@ from .calculators.hedge_validator import is_effective_hedge
 from .calculators.risk_reserve import calc_total_risk_reserve
 from .calculators.lcr import calc_lcr_impact
 from .calculators.nsfr import calc_nsfr_impact
+from .calculators.net_capital import calc_nc_impact
 
 
 def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, Any]:
@@ -40,19 +41,23 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     # ===== 步骤2：对冲有效性判断 =====
     is_effective = is_effective_hedge(otc, hedge_list)
 
-    # ===== 步骤3：风险资本准备 =====
+    # ===== 步骤3：净资本变动计算 =====
+
+    net_capital_change = calc_nc_impact(otc, hedge_list)
+
+    # ===== 步骤4：风险资本准备 =====
     new_risk_reserve = calc_total_risk_reserve(otc, hedge_list, is_effective[0])
 
-    # ===== 步骤4：LCR影响 =====
+    # ===== 步骤5：LCR影响 =====
     lcr = calc_lcr_impact(otc, hedge_list)
 
-    # ===== 步骤5：NSFR影响 =====
+    # ===== 步骤6：NSFR影响 =====
     nsfr = calc_nsfr_impact(otc, hedge_list)
 
-    # ===== 步骤6：表内外资产总额变动（简化：名义本金的10%）=====
+    # ===== 步骤7：表内外资产总额变动（简化：名义本金的10%）=====
     new_assets = otc.notional * 0.10 + sum(h.notional * 0.10 for h in hedge_list)
 
-    # ===== 步骤7：计算三大指标的前后对比 =====
+    # ===== 步骤8：计算三大指标的前后对比 =====
 
     # --- LCR ---
     # HQLA_new = 基准HQLA(元→万元) + 变动(万元)
@@ -70,9 +75,9 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     # --- 风险覆盖率 ---
     risk_reserve_new = DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000 + new_risk_reserve
     risk_old = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000 / (DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000)
-    risk_new = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000 / risk_reserve_new if risk_reserve_new > 0 else 999
+    risk_new = (DEFAULT_CONFIG["firm"]["net_capital_base"] + net_capital_change) / 10000 / risk_reserve_new if risk_reserve_new > 0 else 999
 
-    # ===== 步骤8：组装返回结果 =====
+    # ===== 步骤9：组装返回结果 =====
     return {
         # 现金流与创收
         "net_day1_cash": net_day1_cash,              # 首日净现金流（万元）

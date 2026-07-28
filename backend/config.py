@@ -11,6 +11,7 @@ DEFAULT_CONFIG = {
     "client": {
         "swap_margin_rate": 0.10,           # 收益互换默认保证金比例 10%（监管允许最低保证金）
         "option_premium_rate": 0.05,        # 场外期权默认权利金/名义本金比例 5%
+        "option_margin_rate": 0.10,         # 场外卖出期权默认保证金比例 10%
         "atm_option_delta": 0.50,           # 平值期权默认Delta（ATM = At-The-Money）
         "equity_swap_delta": 1.0,           # 互换默认Delta 100%（互换相当于直接持有标的）
         "income_certificate_delta": 0.0,     # 收益凭证默认Delta 0%（本质是固收产品，无权益敞口）
@@ -25,6 +26,7 @@ DEFAULT_CONFIG = {
         "private_fund_cash_rate": 1.0,      # 私募基金申购资金占用比例 100%
         "etf_cash_rate": 1.0,               # ETF现货资金消耗比例 100%（全款买入）
         "onsite_option_premium_rate": 0.02, # 场内期权默认权利金比例 2%
+        "onsite_option_margin_rate": 0.10,  # 场内卖出期权默认保证金比例 10%
         "otc_option_premium_rate": 0.03,    # 场外期权（背对背平盘）默认权利金比例 3%
         "atm_option_delta": 0.5,            # 场内外期权默认Delta值（平值期权≈0.5）
         "onsite_option_stress_loss": 0.0,   # 卖出压力测试最大损失（万元），默认0=未设置

@@ -151,3 +151,193 @@ def get_onsite_option_greeks(option_code: str, greek_letter: str = 'delta') -> O
     except Exception as e:
         print(f"获取期权greeks值失败: {e}")
         return None
+
+
+# ==== 获取标的价格函数组，服务于计算压力测试最大损失 ====
+def is_trading_time() -> bool:
+    """
+    判断当前是否处于 A 股交易时间
+    Returns:
+        bool: True 表示在交易时间内，False 表示不在
+    """
+    now = datetime.now()
+    if now.weekday() >= 5:  # 5=周六, 6=周日
+        return False
+    current_time = now.time()
+    # 上午
+    morning_start = datetime.strptime("09:30:00", "%H:%M:%S").time()
+    morning_end = datetime.strptime("11:30:00", "%H:%M:%S").time()
+    # 下午
+    afternoon_start = datetime.strptime("13:00:00", "%H:%M:%S").time()
+    afternoon_end = datetime.strptime("15:00:00", "%H:%M:%S").time()
+    # 集合竞价时段也视为可获取实时数据（9:15-9:25）
+    auction_start = datetime.strptime("09:15:00", "%H:%M:%S").time()
+    auction_end = datetime.strptime("09:25:00", "%H:%M:%S").time()
+    
+    if (morning_start <= current_time <= morning_end or
+        afternoon_start <= current_time <= afternoon_end or
+        auction_start <= current_time <= auction_end):
+        return True
+    return False
+
+
+def get_underlying_spot_price(ifind_code: str, spot_type: str, market: str) -> Optional[float]:
+    """
+    获取标的物实时现货价格或收盘价
+    
+    Args:
+        ifind_code: 同花顺代码，如 'AAPL.O', '000300.SH'
+        spot_type: 现货类型，如 'stock', 'index', 'fund' , 'future' , 'spot'(用于商品)等大类
+        market: 市场类型，如 'CN', 'US', 'HK' ,'JP' , 'EN' 等
+    
+    Returns:
+        float: 标的物现货价格
+               - 交易时间内：返回实时价格
+               - 非交易时间：返回最近收盘价
+    """
+    if not ifind_login():
+        print("登录失败")
+        return None
+    
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    conservative_date = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    # ====== 判断是否在交易时间内 ======
+    if is_trading_time():
+        print(f"当前处于交易时间，使用 THS_RQ 获取实时价格")
+        realtime_price = get_realtime_price(ifind_code, market)
+        if realtime_price is not None:
+            return realtime_price
+        # 实时价格无权限或获取失败，退而求其次使用历史数据获取最新收盘价
+        print("正在获取最近交易日收盘价...")
+        return get_latest_close_price(ifind_code, spot_type, market, conservative_date, current_date)
+    else:
+        print(f"当前非交易时间，正在使用历史数据获取最新收盘价...")
+        return get_latest_close_price(ifind_code, spot_type, market, conservative_date, current_date)
+
+
+def get_realtime_price(ifind_code: str, market: str) -> Optional[float]:
+    """
+    使用 THS_RQ 获取实时价格
+    
+    Args:
+        ifind_code: 同花顺代码
+        spot_type: 现货类型
+        market: 市场类型
+    
+    Returns:
+        float: 实时价格，失败返回 None
+    """
+    try:
+        result = THS_RQ(ifind_code, 'latest')
+        if result is None:
+            print("THS_RQ 返回 None")
+            return None
+        if hasattr(result, 'errorcode') and result.errorcode != 0:
+            if result.errorcode == -4230 or result.errorcode == -4225:
+                print(f"无当前标的：{ifind_code} 实时行情权限（错误码：{result.errorcode}），将显示最近交易日收盘价")
+            elif result.errorcode == -4001:
+                print(f"当前标的：{ifind_code} 无实时行情数据（错误码：{result.errorcode}），将显示最近交易日收盘价")
+            else:
+                print(f"THS_RQ 获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
+            return None
+        data = pd.DataFrame(result.data)
+        THS_iFinDLogout()
+        
+        # 检查数据是否为空
+        if data.empty:
+            print("THS_RQ 获取数据为空")
+            return None
+        
+        # 提取价格
+        price = data['latest'].iloc[0]
+        if pd.isna(price):
+            print(f"实时价格为 NaN")
+            return None
+        return float(price)
+    
+    except Exception as e:
+        print(f"获取实时价格失败: {e}")
+        return None
+
+
+def get_latest_close_price(ifind_code: str, spot_type: str, market: str, start_date: str, end_date: str) -> Optional[float]:
+    """
+    获取最新的收盘价（非交易时间使用）
+    
+    Args:
+        ifind_code: 同花顺代码
+        spot_type: 现货类型
+        market: 市场类型
+        start_date: 开始日期
+        end_date: 结束日期
+    
+    Returns:
+        float: 最新有效价格，失败返回 None
+    """
+
+    # 映射字典：现货类型 + 市场组合 -> iFinD 函数价格类型字段
+    mapping_dict = {
+        'stockCN': 'ths_close_price_stock', # A股股票
+        'stockUS': 'ths_close_price_uss', # 美股股票
+        'stockHK': 'ths_close_price_hks', # 港股股票
+        'stockEN': 'ths_close_gbs', # 英国股票
+        'stockOther': 'close_price', # 其他股票
+        'index': 'ths_close_price_index', # 指数
+        'fund': 'ths_close_price_fund', # 基金
+        'future': 'ths_close_price_future', # 期货
+        'spot': 'ths_close_price_spot', # 现货
+        'option': 'ths_close_price_option' # 期权，以防止用期权作标的的奇葩东西
+    }
+    # 建立现货类型 + 市场组合二元组，用于匹配iFinD函数价格类型字段 
+    type_market = spot_type + ""  # 非股票
+
+    if spot_type == 'stock':  # 股票需要区分市场
+        if market == 'CN' or market == 'US' or market == 'HK' or market == 'EN':
+            type_market = spot_type + market
+        else:
+            type_market = spot_type + 'Other'
+    price_type = mapping_dict.get(type_market, None)
+
+    try:
+        result = THS_DS(ifind_code, price_type, '100', 'Days:Tradedays,Fill:Blank', start_date, end_date)
+        if result is None:
+            print("THS_DS 返回 None")
+            return None
+        if hasattr(result, 'errorcode') and result.errorcode != 0:
+            print(f"THS_DS 获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
+            return None
+        data = pd.DataFrame(result.data)
+        if data.empty:
+            print("THS_DS 获取数据为空")
+            return None
+        
+        col_names = data.columns.tolist()
+        price_col = col_names[-1]
+        prices = data[price_col].tolist()
+        if not prices:
+            print("无有效价格数据")
+            return None
+        if np.isnan(prices[-1]):
+            return prices[-2]
+        else:
+            return prices[-1]
+
+    except Exception as e:
+        print(f"获取历史价格失败: {e}")
+        return None
+
+# =============== 以下为测试代码 ===============
+
+
+ifind_login()
+result1 = THS_DS('AEX.GI', 'ths_close_price_index', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-28')
+result2 = THS_DS('510130.SH', 'ths_close_price_fund', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-28')
+result3 = THS_DS('SC2703.INE', 'ths_close_price_future', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-28')
+result4 = THS_DS('NVDA.O', 'ths_close_price_uss', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-28')
+print(result1)
+print(result2)
+print(result3)
+print(result4)
+
+a = get_underlying_spot_price('000001.CCI', 'index', 'CN')
+print(f"AEX.GI现货价格: {a}")

@@ -34,36 +34,37 @@ class OtcContract:
     """对应模块A：场外衍生品业务要素"""
 
     # ===== 基础信息（所有合约类型通用） =====
-    contract_type: str          # 合约类型字符串："call_option" | "put_option" | "equity_swap" | "income_certificate"
+    contract_type: str          # 合约类型字符串："option" | "equity_swap" | "income_certificate"
     direction: str              # 券商视角方向："buy"/"short"（期权）或 "long"/"short"（互换）
     notional: float             # 名义本金/发行规模（单位：万元）。对期权=名义本金，对收益凭证=发行规模
 
     # ===== 标的资产属性 =====
-    underlying_type: str        # 标的资产分类，影响风险系数：index_component/general_stock/restricted_stock/other_stock
+    underlying_type: Optional[str]         # 标的资产分类，影响风险系数：index_component/general_stock/restricted_stock/other_stock
     underlying_name: Optional[str] = None  # 标的资产名称（如"中证1000"），可选
-    underlying_code: Optional[str] = None  # 标的资产代码（如"000852"），可选，用于查价格算相关性
+    underlying_code: Optional[str] = None  # 标的资产iFinD代码（如"000852.SH"），可选，用于查价格算相关性
 
     # ===== 期权专有字段 =====
-    # 【设计思路】不同合约类型用不同字段，未使用的字段保持 None
-    #           这是"宽表"设计——所有字段放一起，用类型区分哪些字段有效
     option_type: Optional[str] = None        # 期权类型："call_option"=看涨 | "put_option"=看跌
     premium_rate: Optional[float] = None        # 权利金比例（%），如5表示5%，权利金 = 名义本金 × 权利金比例
     total_premium_amount: Optional[float] = None # 权利金总额（万元），直接指定总额时使用
     single_premium_amount: Optional[float] = None # 单笔期权费（万元），配合合约份数使用
-    contract_multiplier: Optional[float] = None # 合约乘数（元/点），类似股指期权每点对应多少元
-    contract_size: Optional[float] = None       # 合约份数（份）
-    exercise_price: Optional[float] = None      # 行权价（元）
-    option_delta: Optional[float] = None        # Delta值（%），如0.5=50%，用于计算Delta敞口
-    stress_loss: Optional[float] = None         # 压力测试最大损失（万元），卖出场外期权专用
+    contract_multiplier: Optional[float] = None  # 合约乘数（元/点），类似股指期权每点对应多少元
+    contract_size: Optional[float] = None        # 合约份数（份）
+    exercise_price: Optional[float] = None       # 行权价（元）
+    option_delta: Optional[float] = None         # Delta值（%），如0.5=50%，用于计算Delta敞口
+    option_margin_amount: Optional[float] = None # 场外卖出期权保证金绝对值（万元），与margin_rate二选一
+    option_margin_rate: Optional[float] = None   # 场外卖出期权保证金比例（%）
+    stress_loss: Optional[float] = None          # 压力测试最大损失（万元），卖出场外期权专用
 
     # ===== 收益互换专有字段 =====
-    margin_rate: Optional[float] = None         # 保证金比例（%），如10表示客户缴纳10%保证金
-    margin_amount: Optional[float] = None       # 保证金绝对值（万元），与margin_rate二选一
+    equity_swap_margin_rate: Optional[float] = None         # 保证金比例（%），如10表示客户缴纳10%保证金
+    equtiy_swap_margin_amount: Optional[float] = None       # 保证金绝对值（万元），与margin_rate二选一
     equity_swap_delta: Optional[float] = None          # 互换Delta值（%），通常为100%
 
     # ===== 收益凭证专有字段 =====
     funds_raised: Optional[float] = None        # 募集资金总额（万元），收益凭证的实际融资额
-    income_certificate_delta: Optional[float] = None      # OC Delta值（%），收益凭证通常为0（无权益敞口）
+    is_float_income: Optional[bool] = None          # 收益类型，浮动收益为True，固定收益为False
+    income_certificate_delta: Optional[float] = None      # 收益凭证Delta值（%），固定收益凭证为0（无权益敞口）
 
     # ===== 通用字段：预期创收与期限 =====
     expected_yield: float = 0.08                # 预期年化收益率（小数），0.08=8%，用于计算预期创收
@@ -138,13 +139,21 @@ class OtcContract:
         """获取压力测试最大损失"""
         return self.stress_loss
 
-    def get_margin_rate(self) -> Optional[float]:
-        """获取互换保证金比例"""
-        return self.margin_rate
+    def get_option_margin_amount(self) -> Optional[float]:
+        """获取保证金绝对值"""
+        return self.option_margin_amount
 
-    def get_margin_amount(self) -> Optional[float]:
+    def get_option_margin_rate(self) -> Optional[float]:
+        """获取保证金比例"""
+        return self.option_margin_rate
+    
+    def get_equity_swap_margin_rate(self) -> Optional[float]:
+        """获取互换保证金比例"""
+        return self.equity_swap_margin_rate
+
+    def get_equity_swap_margin_amount(self) -> Optional[float]:
         """获取互换保证金"""
-        return self.margin_amount
+        return self.equity_swap_margin_amount
 
     def get_equity_swap_delta(self) -> Optional[float]:
         """获取收益互换Delta值"""
