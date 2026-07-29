@@ -156,18 +156,18 @@ def get_underlying_spot_price(ifind_code: str, spot_type: str, market: str) -> O
     # ====== 判断是否在交易时间内 ======
     if is_trading_time():
         print(f"当前处于交易时间，使用 THS_RQ 获取实时价格")
-        realtime_price = get_realtime_price(ifind_code, market)
+        realtime_price = get_realtime_price(ifind_code)
         if realtime_price is not None:
             return realtime_price
         # 实时价格无权限或获取失败，退而求其次使用历史数据获取最新收盘价
         print("正在获取最近交易日收盘价...")
-        return get_latest_close_price(ifind_code, spot_type, market, conservative_date, current_date)
+        return get_latest_close_price(ifind_code, spot_type, conservative_date, current_date, market)
     else:
         print(f"当前非交易时间，正在使用历史数据获取最新收盘价...")
-        return get_latest_close_price(ifind_code, spot_type, market, conservative_date, current_date)
+        return get_latest_close_price(ifind_code, spot_type, conservative_date, current_date, market)
 
 
-def get_realtime_price(ifind_code: str, market: str) -> Optional[float]:
+def get_realtime_price(ifind_code: str) -> Optional[float]:
     """
     使用 THS_RQ 获取实时价格
     
@@ -340,4 +340,11 @@ print(result3)
 print(result4)
 
 a = get_underlying_spot_price('000001.CCI', 'index', 'CN')
-print(f"AEX.GI现货价格: {a}")
+print(f"现货价格: {a}")
+
+b = get_onsite_option_greeks('90007054.SZ', 'delta')
+print(f" delta值: {b}")
+
+c = THS_DS('000001.CCI', 'ths_close_price_index', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-29')
+print(c)
+
