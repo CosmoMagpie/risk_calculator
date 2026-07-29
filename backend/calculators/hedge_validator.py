@@ -38,9 +38,15 @@ def _collect_deltas(
     # 对冲端
     for hedge in hedge_list:
         if hedge.get_tool_type() == "onsite_option":
-            # 场内期权优先从 iFinD API 获取实时 Delta，失败则回落本地计算
-            hedge_delta = get_onsite_option_greeks(hedge.get_tool_code(), "delta")
-            if hedge_delta is None:
+            # 场内期权优先从 iFinD API 获取实时 Delta 系数
+            delta_coef = get_onsite_option_greeks(hedge.get_tool_code(), "delta")
+            if delta_coef is not None:
+                # iFinD 返回的是 Delta 系数，需乘以名义本金转为 Delta 金额
+                notional = hedge.get_tool_notional() or 0.0
+                direction_str = hedge.get_tool_direction()
+                direction = 1 if direction_str == "long" else -1
+                hedge_delta = direction * abs(delta_coef) * notional
+            else:
                 hedge_delta = hedge.get_hedge_delta_amount()
         else:
             hedge_delta = hedge.get_hedge_delta_amount()

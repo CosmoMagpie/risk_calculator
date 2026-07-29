@@ -315,63 +315,144 @@ def get_underlying_spot_price(
 def get_onsite_option_greeks(
     option_code: Optional[str],
     greek_letter: str = 'delta',
+    spot_price: Optional[float] = None,
+    strike_price: Optional[float] = None,
+    risk_free_rate: float = 0.02,
+    days_to_expiry: Optional[int] = None,
+    option_type: str = 'call',
 ) -> Optional[float]:
     """
-    获取场内期权希腊字母值（通过同花顺 iFinD API）
+    获取场内期权希腊字母值
+
+    优先通过 iFinD API 获取；若 API 不可用，回退到本地 Black-Scholes 模型估算。
 
     Args:
-        option_code: 期权代码，为空时直接返回 None
+        option_code: 期权代码（iFinD 格式，如 '10011855' 或 '10011855.SH'），为空时仅尝试本地计算
         greek_letter: 'delta' | 'gamma' | 'vega' | 'theta' | 'rho'
+        spot_price: 标的现价（本地模型必需）
+        strike_price: 行权价（本地模型必需）
+        risk_free_rate: 无风险利率，默认 2%
+        days_to_expiry: 距到期天数（本地模型必需）
+        option_type: 'call' | 'put'，默认 'call'
 
     Returns:
-        float: 期权当日希腊字母值，获取失败返回 None
+        float: 希腊字母值，获取失败返回 None
     """
-    if option_code is None or str(option_code).strip() == "":
-        return None
+    # ---- 优先尝试 iFinD API ----
+    if option_code and str(option_code).strip() != "" and ifind_login():
+        map_dict = {
+            'delta': 'ths_delta_option',
+            'gamma': 'ths_gamma_option',
+            'vega': 'ths_vega_option',
+            'theta': 'ths_theta_option',
+            'rho': 'ths_rho_option',
+        }
+        greek_wanted = map_dict.get(greek_letter)
+        if greek_wanted is None:
+            print(f"[iFinD] 不支持的希腊字母: {greek_letter}")
+        else:
+            # 尝试多种代码格式：原代码 → 原代码.SH → (已带后缀则不再追加)
+            code = str(option_code).strip()
+            code_variants = [code]
+            if not code.endswith('.SH') and not code.endswith('.SZ'):
+                code_variants.append(code + '.SH')
 
-    if not ifind_login():
-        return None
+            current_date = datetime.now().strftime('%Y-%m-%d')
+            conservative_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
 
-    map_dict = {
-        'delta': 'ths_delta_option',
-        'gamma': 'ths_gamma_option',
-        'vega': 'ths_vega_option',
-        'theta': 'ths_theta_option',
-        'rho': 'ths_rho_option',
-    }
-    greek_wanted = map_dict.get(greek_letter)
-    if greek_wanted is None:
-        print(f"[iFinD] 不支持的希腊字母: {greek_letter}")
-        return None
+            for variant in code_variants:
+                try:
+                    result = THS_DS(
+                        variant,
+                        greek_wanted,
+                        '100',
+                        'Days:Tradedays,Fill:Blank',
+                        conservative_date,
+                        current_date,
+                    )
+                    if result is None:
+                        continue
+                    if hasattr(result, 'errorcode') and result.errorcode != 0:
+                        continue
 
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    conservative_date = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+                    data = pd.DataFrame(result.data)
+                    if data.empty or greek_wanted not in data.columns:
+                        continue
 
-    try:
-        result = THS_DS(
-            option_code,
-            greek_wanted,
-            '100',
-            'Days:Tradedays,Fill:Blank',
-            conservative_date,
-            current_date,
+                    values = pd.to_numeric(data[greek_wanted].tolist(), errors='coerce')
+                    for val in reversed(values):
+                        if not np.isnan(val):
+                            if variant != code:
+                                print(f"[iFinD] Greeks 通过 {variant} 获取成功 "
+                                      f"(原始代码 {code} 无有效值)")
+                            return float(val)
+
+                except Exception as e:
+                    continue
+
+            # 所有尝试均失败
+            print(f"[iFinD] {option_code} 的 {greek_wanted} 获取失败: "
+                  "所有代码格式均无有效数据，iFinD 当前账号可能不提供期权 Greeks")
+
+    # ---- 回退：本地 Black-Scholes 模型 ----
+    if spot_price and strike_price and days_to_expiry and spot_price > 0 and strike_price > 0:
+        return _calc_bs_greek(
+            spot_price, strike_price, risk_free_rate,
+            days_to_expiry, greek_letter, option_type,
         )
-        if result is None:
-            return None
-        if hasattr(result, 'errorcode') and result.errorcode != 0:
-            print(f"[iFinD] THS_DS Greeks 失败 {option_code}: {result.errorcode}, {result.errmsg}")
-            return None
 
-        data = pd.DataFrame(result.data)
-        if data.empty:
-            return None
+    return None
 
-        values = pd.to_numeric(data[greek_wanted].tolist(), errors='coerce')
-        for val in reversed(values):
-            if not np.isnan(val):
-                return float(val)
+
+def _calc_bs_greek(
+    S: float, K: float, r: float, T_days: int,
+    greek: str, option_type: str = 'call',
+) -> Optional[float]:
+    """
+    使用 Black-Scholes 模型计算希腊字母（辅助函数）
+
+    Args:
+        S: 标的现价
+        K: 行权价
+        r: 无风险利率（年化）
+        T_days: 距到期天数
+        greek: 'delta' | 'gamma' | 'vega' | 'theta' | 'rho'
+        option_type: 'call' | 'put'
+
+    Returns:
+        float: 希腊字母值
+    """
+    from scipy.stats import norm
+
+    T = T_days / 365.0
+    if T <= 0:
         return None
 
-    except Exception as e:
-        print(f"[iFinD] 获取 Greeks 失败 {option_code}: {e}")
+    # 估算波动率（简单假设 20% 年化）
+    sigma = 0.20
+
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+
+    sign = 1 if option_type == 'call' else -1
+
+    if greek == 'delta':
+        # call: N(d1);  put: N(d1) - 1
+        return float(norm.cdf(d1) if option_type == 'call' else norm.cdf(d1) - 1)
+    elif greek == 'gamma':
+        return float(norm.pdf(d1) / (S * sigma * np.sqrt(T)))
+    elif greek == 'vega':
+        # vega 通常按 1% 波动率变化报价，即导数 / 100
+        return float(S * norm.pdf(d1) * np.sqrt(T) / 100)
+    elif greek == 'theta':
+        # theta 按每天衰减（年化 derivative / 365）
+        theta_call = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                      - r * K * np.exp(-r * T) * norm.cdf(d2))
+        theta_put = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                     + r * K * np.exp(-r * T) * norm.cdf(-d2))
+        return float((theta_call if option_type == 'call' else theta_put) / 365)
+    elif greek == 'rho':
+        # rho 按 1% 利率变化报价
+        return float(K * T * np.exp(-r * T) * norm.cdf(sign * d2) * sign / 100)
+    else:
         return None

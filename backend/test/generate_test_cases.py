@@ -10,6 +10,10 @@ import math
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
+# 设置 iFinD 凭据（供 ifind_client 内部 _get_credentials 读取）
+os.environ["IFIND_USER_NAME"] = "glzq703"
+os.environ["IFIND_PASSWORD"] = "96998XuY"
+
 # 将项目根目录加入 sys.path，使 backend 包可被导入
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _project_root not in sys.path:
@@ -24,11 +28,10 @@ from backend.calculators import hedge_validator
 # ============================================================
 
 def _try_ifind_login() -> bool:
-    """尝试登录 iFinD；未安装包或无终端时返回 False。"""
+    """尝试登录 iFinD；通过 ifind_client 封装函数走缓存登录。"""
     try:
-        from iFinDPy import THS_iFinDLogin
-        result = THS_iFinDLogin('glzq703', '96998XuY')
-        return result in {0, -201}
+        from backend.services.ifind_client import ifind_login, ifind_logout
+        return ifind_login(force=True)
     except Exception:
         return False
 
@@ -279,14 +282,14 @@ TEST_CASES: List[Dict[str, Any]] = [
     {
         "id": "TC08",
         "name": "卖出看涨期权 + 场内期权对冲（依赖 iFinD 获取实时 Greeks）",
-        "scenario": "重点测试 iFinD 场内期权 Greeks 接口。填写场内期权代码后，系统将尝试调用 get_onsite_option_greeks 获取实时 Delta；若 iFinD 未登录或获取失败，则回退到手动输入的 Delta 值。",
+        "scenario": "重点测试 iFinD 场内期权 Greeks 接口。卖出 50ETF 看涨期权，交易台买入 50ETF 场内看涨期权对冲。填写场内期权合约编码后，系统通过 iFinD 获取实时 Delta 值替代手动输入。",
         "client": {
             "contract_type": "call_option",
             "direction": "short",
             "notional": 10000.0,
             "underlying_type": "index_component",
-            "underlying_name": "沪深300指数",
-            "underlying_code": "000300.SH",
+            "underlying_name": "上证50ETF",
+            "underlying_code": "510050.SH",
             "option_type": "call_option",
             "premium_rate": 5.0,
             "option_delta": 0.72,
@@ -302,12 +305,12 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "option_type": "call_option",
                 "option_delta": 0.80,
                 "option_premium": 180.0,
-                "tool_code": "510050C2508M03000",
+                "tool_code": "10011855",
                 "underlying_name": "50ETF 场内看涨期权",
-                "underlying_code": "000300.SH",
+                "underlying_code": "510050.SH",
             },
         ],
-        "ifind_trigger": ["get_onsite_option_greeks(510050C2508M03000, 'delta')"],
+        "ifind_trigger": ["get_onsite_option_greeks(10011855, 'delta')"],
     },
 ]
 
