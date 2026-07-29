@@ -348,3 +348,5 @@ print(f" delta值: {b}")
 c = THS_DS('000001.CCI', 'ths_close_price_index', '100', 'Days:Tradedays,Fill:Blank','2026-07-14','2026-07-29')
 print(c)
 
+d = THS_HQ('10010973.SH', 'close', 'fill:Omit', '2025-07-29', '2026-07-29')
+print(d)
