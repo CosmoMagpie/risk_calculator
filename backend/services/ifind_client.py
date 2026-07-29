@@ -56,7 +56,7 @@ def get_underlying_price_series(underlying_code: str,
 
     try:
         # 调用 THS_HQ 获取行情数据
-        result = THS_HQ(underlying_code, price_type, 'fill:omit', start_date, end_date)
+        result = THS_HQ(underlying_code, price_type, 'fill:Omit', start_date, end_date)
         if result is None:
             print("THS_DS 返回 None")
             return {underlying_code: []}
@@ -64,7 +64,7 @@ def get_underlying_price_series(underlying_code: str,
             print(f"获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
             return {underlying_code: []}
         data = pd.DataFrame(result.data)
-        THS_iFinDLogout()
+
         if data.empty:
             print("获取数据为空")
             return {underlying_code: []}
@@ -137,16 +137,17 @@ def get_onsite_option_greeks(option_code: str, greek_letter: str = 'delta') -> O
             print(f"获取数据失败，错误码: {greeklist.errorcode}, 错误信息: {greeklist.errmsg}")
             return None
         data = pd.DataFrame(greeklist.data)
-        THS_iFinDLogout()
+        
         if data.empty:
             print("获取数据为空")
             return None
-        greek_value_list = data[greek_wanted].tolist()
-        if np.isnan(greek_value_list[-1]):
-            greek_value = greek_value_list[-2]
-        else:
-            greek_value = greek_value_list[-1]
-        return greek_value
+        greek_value_list = pd.to_numeric(data[greek_wanted].tolist(), errors='coerce')
+        # 从后往前取第一个有效值，避免当日未收盘导致最新值为空
+        for val in reversed(greek_value_list):
+            if not np.isnan(val):
+                return float(val)
+        print("Greeks 数据均为空")
+        return None
 
     except Exception as e:
         print(f"获取期权greeks值失败: {e}")

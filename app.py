@@ -3,10 +3,38 @@
 # ============================================================
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from backend import ClientContract, HedgeTrade, analyze_contract, DEFAULT_CONFIG
+
+# ========== 中英文映射字典 ==========
+CN_CONTRACT_TYPE = {
+    "场外期权": "call_option",    # 默认; tab1 中由 option_type 决定 call_option/put_option
+}
+CN_PRODUCT = {"场外期权": "option", "收益互换": "equity_swap", "收益凭证": "income_certificate"}
+
+CN_DIRECTION = {"买入": "buy", "卖出": "short", "多头": "long", "空头": "short"}
+
+# 对冲工具方向：后端 HedgeTrade 用 long/short，与合约端 buy/short 不同
+CN_HEDGE_DIRECTION = {"买入": "long", "卖出": "short"}
+
+CN_OPTION_TYPE = {"看涨期权": "call_option", "看跌期权": "put_option"}
+
+CN_TOOL_TYPE = {
+    "ETF现货": "etf",
+    "个股": "stock",
+    "场内期货": "futures",
+    "期货": "futures",
+    "场内期权": "onsite_option",
+    "场外背对背对冲": "otc_hedge",
+    "私募基金": "private_fund",
+}
+
+CN_STOCK_TYPE = {
+    "指数成分股": "index_component",
+    "一般上市公司股票": "general_stock",
+    "流动受限股票": "restricted_stock",
+    "其他股票": "other_stock",
+}
 
 # ========== 公共工具函数 ==========
 
@@ -17,7 +45,7 @@ def validate_option_delta(direction, option_type_str, delta_value):
     参数:
         direction: 交易方向，如 "买入"/"卖出"/"多头"/"空头"
         option_type_str: 期权类型，如 "看涨期权"/"看跌期权"
-        delta_value: Delta 数值（%）
+        delta_value: Delta 数值（系数，如 0.50 表示 50%）
     
     返回:
         (is_valid: bool, message: str)
@@ -108,13 +136,16 @@ with tab1:
             st.caption(f" 约 {term_days/30:.1f} 个月")
     
     with col2:
-        # 首日资金收付
+        # --- 默认值（所有分支均需初始化）---
         premium_rate = None
         margin_rate = None
         funds_raised = None
         stress_loss = None
         option_delta = None
-        underlying_type = "index_component"  # 场外期权/收益凭证默认；收益互换由checkbox覆盖
+        underlying_type = "index_component"
+
+        # 期权类型（仅场外期权）
+        client_option_type = None
         if "期权" in contract_type:
             client_option_type = st.selectbox("期权类型", ["看涨期权", "看跌期权"])
             premium_rate = st.number_input("权利金比例（%）", min_value=0.0, value=5.0, step=0.5)
@@ -126,8 +157,8 @@ with tab1:
             elif client_option_type == "看涨期权" and direction == "卖出":
                 suggested_delta = -suggested_delta
             # 买入看涨 / 卖出看跌 保持正数
-            option_delta = st.number_input("Delta(%)", value=suggested_delta, key="client_option_delta", 
-                                           help="Delta = 期权价格对标的资产价格的敏感度。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。")
+            option_delta = st.number_input("Delta（系数，如 0.50=50%）", value=suggested_delta, key="client_option_delta", 
+                                           help="期权价格对标的资产价格的敏感度，非百分比。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。如 50% Delta 请填入 0.50")
             # ========== Delta 符号校验 ==========
             delta_valid, delta_warning_msg = validate_option_delta(direction, client_option_type, option_delta)
             expected_sign_map = {
@@ -163,16 +194,35 @@ with tab1:
         else:  # 收益凭证
             funds_raised = st.number_input("募集资金总额（万元）", value=notional, step=100.0)
             delta_amount = None
-            stress_loss = None
+            st.caption("浮动型收益凭证（内嵌期权结构）需填写压力损失；固定型请留空")
+            stress_loss = st.number_input("压力损失（万元）", value=0.0, step=10.0,
+                                          help="浮动型凭证在标的资产极端波动下的最大亏损。填0或留空表示固定型（风险准备=0）")
+            if stress_loss == 0.0:
+                stress_loss = None  # 0 → None = 固定型
     
-    # 存储合约端参数
+    # ---- 标的资产信息（所有产品类型共用）----
+    st.divider()
+    st.caption("标的资产信息用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
+    col_code1, col_code2 = st.columns(2)
+    with col_code1:
+        underlying_name = st.text_input("标的名称", placeholder="如：沪深300指数", key="client_ul_name")
+    with col_code2:
+        underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="client_ul_code")
+    
+    # 存储合约端参数（中文→英文映射）
+    en_contract_type = (
+        CN_OPTION_TYPE[client_option_type] if client_option_type
+        else CN_PRODUCT[contract_type]
+    )
+    en_direction = CN_DIRECTION[direction]
     st.session_state['client_params'] = {
-        "contract_type": contract_type,
-        "direction": direction,
+        "contract_type": en_contract_type,
+        "direction": en_direction,
         "notional": notional,
         "underlying_type": underlying_type,
-        "underlying_name": "",
-        "underlying_code": "",
+        "underlying_name": underlying_name or "",
+        "underlying_code": underlying_code or "",
+        "option_type": CN_OPTION_TYPE[client_option_type] if client_option_type else None,
         "premium_rate": premium_rate,
         "margin_rate": margin_rate,
         "funds_raised": funds_raised,
@@ -206,7 +256,7 @@ with tab2:
         with col1:
             tool_type = st.selectbox(
                 "工具类型",
-                ["ETF现货", "个股", "期货", "场内期权", "场外背对背对冲", "私募基金"],
+                ["ETF现货", "个股", "场内期货", "场内期权", "场外背对背对冲", "私募基金"],
                 key="new_tool_type"
             )
             tool_direction = st.selectbox("方向", ["买入", "卖出"], key="new_tool_dir")
@@ -215,8 +265,11 @@ with tab2:
         with col2:
             cash_spent = futures_margin = option_premium = option_delta = otc_payment = subscription_amount = None
             pass_through_fee = None
+            option_type = None
             delta_valid = True  # 非期权工具默认通过校验
             stock_type_value = None  # ETF/个股的标的资产分类，通过下方下拉框赋值
+            etf_name = etf_code = stock_name = stock_code = future_ul_code = None
+            option_code = option_ul_code = otc_underlying_code = None
             
             if tool_type == "ETF现货":
                 cash_spent = st.number_input("资金消耗（万元）", value=tool_notional)
@@ -226,7 +279,7 @@ with tab2:
                     key="etf_stock_type",
                     help="参见上方「标的资产分类」表格。宽基ETF选「指数成分股」RSF=10%；非宽基ETF选「一般上市公司股票」RSF=50%"
                 )
-                st.caption("基金名称和代码均为选填，用于有效对冲判定，若不填则按照最保守方式估计风控指标")
+                st.caption("ETF代码为有效对冲判定必填项；若不填，系统将无法判定标的一致/相关性，风险资本准备按最保守的单边敞口计提")
                 etf_name = st.text_input("ETF名称")
                 etf_code = st.text_input("ETF代码")
 
@@ -236,13 +289,14 @@ with tab2:
                 stock_type_value = st.selectbox("标的资产分类",
                 ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
                 key="stock_stock_type")
-                st.caption("股票名称和代码均为选填，用于有效对冲判定，若不填则按照最保守方式估计风控指标")
+                st.caption("股票代码为有效对冲判定必填项；若不填，系统将无法判定标的一致/相关性，风险资本准备按最保守的单边敞口计提")
                 stock_name = st.text_input("股票名称")
                 stock_code = st.text_input("股票代码")
             
             elif tool_type == "场内期货":
                 futures_margin = st.number_input("交易保证金（万元）", value=tool_notional * 0.12, min_value = 0.00)
-                future_delta = st.number_input("合约Delta（%）", value=0.0, step=0.1, max_value = 1.0)
+                st.caption("用于有效对冲判定。填写期货标的指数代码（如IF→000300.SH），留空则无法判定标的一致/相关性")
+                future_ul_code = st.text_input("标的指数代码", placeholder="如：000300.SH", key="future_ul_code")
             
             elif tool_type == "场内期权":
                 # ========== 期权专属字段 ==========
@@ -266,10 +320,10 @@ with tab2:
                     suggested_delta = -suggested_delta
                 # 买入看涨 / 卖出看跌 保持正数
                 option_delta = st.number_input(
-                    "Delta(%)", 
+                    "Delta（系数，如 0.50=50%）", 
                     value=suggested_delta,
                     key="new_option_delta",
-                    help="Delta = 期权价格对标的资产价格的敏感度。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。"
+                    help="期权价格对标的资产价格的敏感度，非百分比。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。如 50% Delta 请填入 0.50"
                 )
                 
                 # ========== Delta 符号校验 ==========
@@ -287,10 +341,16 @@ with tab2:
                     st.error(delta_warning_msg)
 
                 st.caption(f"提示：{tool_direction}{option_type}的 Delta 期望符号为 **{expected}**")
+                st.caption("若填写场内期权代码，系统将尝试通过 iFinD 获取实时 Greeks（Delta等）替代手动输入值")
+                option_code = st.text_input("场内期权代码", placeholder="如：510050C2508M03000", key="new_option_code")
+                st.caption("用于有效对冲判定。填写场内期权标的代码（如50ETF→510050.SH），留空则无法判定标的一致/相关性")
+                option_ul_code = st.text_input("标的代码", placeholder="如：510050.SH", key="option_ul_code")
             
             elif tool_type == "场外背对背对冲":
                 otc_payment = st.number_input("向平盘方支付预付金（万元）", value=0.0)
                 pass_through_fee = st.number_input("平盘成本（年化%）", value=2.0, step=0.1)
+                st.caption("用于有效对冲判定，填写被对冲合约的标的代码")
+                otc_underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="otc_underlying_code")
             
             else:  # 私募基金
                 subscription_amount = st.number_input("申购金额（万元）", value=tool_notional)
@@ -299,31 +359,48 @@ with tab2:
             # 校验：Delta 符号是否正确
             if not delta_valid:
                 st.error(f"❌ 无法添加对冲工具：{delta_warning_msg}")
-            hedge = {
-                "tool_type": tool_type,
-                "direction": tool_direction,
-                "notional": tool_notional,
-                "cash_spent": cash_spent,
-                "futures_margin": futures_margin,
-                "option_premium": option_premium,
-                "option_delta": option_delta,
-                "otc_payment": otc_payment,
-                "pass_through_fee": pass_through_fee,
-                "subscription_amount": subscription_amount,
-                "option_type": option_type if tool_type == "场内期权" else None,
-                "stock_type": stock_type_value,
-            }
-            st.session_state['hedge_tools'].append(hedge)
-            st.success("✅ 对冲工具已添加")
-            st.rerun()
+            else:
+                hedge = {
+                    "tool_type": CN_TOOL_TYPE[tool_type],
+                    "direction": CN_HEDGE_DIRECTION[tool_direction],
+                    "notional": tool_notional,
+                    "underlying_type": CN_STOCK_TYPE.get(stock_type_value, "index_component") if stock_type_value else None,
+                    "underlying_name": etf_name or stock_name or "",
+                    "underlying_code": etf_code or stock_code or future_ul_code or option_ul_code or otc_underlying_code or "",
+                    "tool_code": option_code or "",
+                    "cash_spent": cash_spent,
+                    "futures_margin": futures_margin,
+                    "option_premium": option_premium,
+                    "option_delta": option_delta,
+                    "option_type": CN_OPTION_TYPE.get(option_type if tool_type == "场内期权" else None),
+                    "otc_payment": otc_payment,
+                    "pass_through_fee": pass_through_fee,
+                    "subscription_amount": subscription_amount,
+                    "stock_type": CN_STOCK_TYPE.get(stock_type_value) if stock_type_value else None,
+                }
+                st.session_state['hedge_tools'].append(hedge)
+                st.success("✅ 对冲工具已添加")
+                st.rerun()
     
     # 展示已有对冲工具
     if st.session_state['hedge_tools']:
-        df = pd.DataFrame(st.session_state['hedge_tools'])
-        st.dataframe(df[['tool_type', 'direction', 'notional']])
-        for i in range(len(st.session_state['hedge_tools']) - 1, -1, -1):
-            if st.button(f"🗑️ 删除 #{i+1}", key=f"del_{i}"):
-                st.session_state['hedge_tools'].pop(i)
+        # 反向映射：英文→中文，用于表格显示
+        REV_TOOL_TYPE = {v: k for k, v in CN_TOOL_TYPE.items() if k != "期货"}
+        REV_DIRECTION = {"buy": "买入", "short": "卖出", "long": "买入"}
+        display_data = []
+        for t in st.session_state['hedge_tools']:
+            display_data.append({
+                "工具类型": REV_TOOL_TYPE.get(t['tool_type'], t['tool_type']),
+                "方向": REV_DIRECTION.get(t['direction'], t['direction']),
+                "名义价值（万元）": t['notional'],
+                "标的代码": t.get('underlying_code', '') or '',
+            })
+        df = pd.DataFrame(display_data)
+        df.index = range(1, len(df) + 1)  # 1-based 序号
+        st.dataframe(df)
+        for idx in range(len(st.session_state['hedge_tools'])):
+            if st.button(f"🗑️ 删除 #{idx+1}", key=f"del_{idx}"):
+                st.session_state['hedge_tools'].pop(idx)
                 st.rerun()
     else:
         st.info("尚无对冲工具，请添加")

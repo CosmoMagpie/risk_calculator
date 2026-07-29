@@ -77,13 +77,13 @@ def is_effective_hedge(
     """
     # ====== 条件1：标的一致 或 相关性 ≥ 95% ======
     otc_code = otc.get_otc_underlying_code()
-    if otc_code is None:
+    if otc_code is None or str(otc_code).strip() == "":
         return [False, "未填写场外合约标的代码，不满足有效对冲条件"]
 
     hedge_codes = [
         h.get_tool_underlying_code()
         for h in hedge_list
-        if h.get_tool_underlying_code() is not None
+        if h.get_tool_underlying_code() is not None and str(h.get_tool_underlying_code()).strip() != ""
     ]
     if not hedge_codes:
         return [False, "未填写对冲工具标的代码，不满足有效对冲条件"]

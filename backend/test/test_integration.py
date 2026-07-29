@@ -8,10 +8,10 @@
 import sys
 import math
 
-from ..config import DEFAULT_CONFIG
-from ..models.client_contract import OtcContract as ClientContract
-from ..models.hedge_trade import HedgeTrade
-from ..analyzer import analyze_contract
+from backend.config import DEFAULT_CONFIG
+from backend.models.client_contract import OtcContract as ClientContract
+from backend.models.hedge_trade import HedgeTrade
+from backend.analyzer import analyze_contract
 
 PASS = 0
 FAIL = 0
