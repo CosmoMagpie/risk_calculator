@@ -42,6 +42,7 @@ class OtcContract:
     underlying_type: str        # 标的资产分类，影响风险系数：index_component/general_stock/restricted_stock/other_stock
     underlying_name: Optional[str] = None  # 标的资产名称（如"中证1000"），可选
     underlying_code: Optional[str] = None  # 标的资产代码（如"000852"），可选，用于查价格算相关性
+    underlying_market: Optional[str] = None  # 标的资产市场（CN/US/HK/EN/Other），默认空表示境内A股
 
     # ===== 期权专有字段 =====
     # 【设计思路】不同合约类型用不同字段，未使用的字段保持 None
@@ -103,6 +104,10 @@ class OtcContract:
     def get_otc_underlying_code(self) -> Optional[str]:
         """获取标的资产代码"""
         return self.underlying_code
+
+    def get_otc_underlying_market(self) -> Optional[str]:
+        """获取标的资产市场"""
+        return self.underlying_market
 
     def get_option_type(self) -> Optional[str]:
         """获取期权类型"""

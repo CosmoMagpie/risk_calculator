@@ -35,6 +35,7 @@ class HedgeTrade:
     underlying_type: Optional[str] = None  # 底层资产类型（如 index_component），ETF/股票时即为tool_type本身
     underlying_name: Optional[str] = None  # 对冲工具底层资产名称
     underlying_code: Optional[str] = None  # 对冲工具底层资产代码（用于查价格、算相关性）
+    underlying_market: Optional[str] = None  # 底层资产市场（CN/US/HK/EN/Other），默认空表示境内A股
 
     # ===== ETF现货字段 =====
     cash_spent: Optional[float] = None     # ETF买入实际花费现金（万元），未指定时默认=名义金额
@@ -153,6 +154,10 @@ class HedgeTrade:
     def get_tool_underlying_code(self) -> Optional[str]:
         """获取对冲工具底层资产代码"""
         return self.underlying_code
+
+    def get_tool_underlying_market(self) -> Optional[str]:
+        """获取对冲工具底层资产市场"""
+        return self.underlying_market
 
     def get_hedge_delta_amount(self) -> Optional[float]:
         """

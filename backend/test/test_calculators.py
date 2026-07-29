@@ -22,6 +22,7 @@ from backend.calculators.risk_reserve import (
     _get_hedge_investment_scale,
     _is_non_full_margin_swap,
     _is_individual_stock,
+    estimate_otc_option_stress_loss,
 )
 
 PASS = 0
@@ -490,6 +491,44 @@ def test_leverage():
 
 
 # ============================================================
+# 6. 压力损失估算器
+# ============================================================
+def test_stress_loss_estimator():
+    print("\n=== 压力损失估算器 ===")
+
+    # 看涨期权：spot=100, strike=100, 上涨20%到120，每份亏20
+    # multiplier=100, size=1000 -> 20*100*1000=2,000,000 元 = 200 万元
+    loss_call = estimate_otc_option_stress_loss(
+        spot_price=100.0,
+        strike_price=100.0,
+        contract_multiplier=100.0,
+        contract_size=1000.0,
+        option_type="call_option",
+    )
+    check("Stress loss call ATM", abs(loss_call - 200.0) < 0.01, f"got {loss_call}")
+
+    # 看跌期权：spot=100, strike=100, 下跌20%到80，每份亏20
+    loss_put = estimate_otc_option_stress_loss(
+        spot_price=100.0,
+        strike_price=100.0,
+        contract_multiplier=100.0,
+        contract_size=1000.0,
+        option_type="put_option",
+    )
+    check("Stress loss put ATM", abs(loss_put - 200.0) < 0.01, f"got {loss_put}")
+
+    # 看涨期权价外：strike=150, 上涨20%到120仍未到行权价，亏损应为0
+    loss_otm = estimate_otc_option_stress_loss(
+        spot_price=100.0,
+        strike_price=150.0,
+        contract_multiplier=100.0,
+        contract_size=1000.0,
+        option_type="call_option",
+    )
+    check("Stress loss OTM call = 0", abs(loss_otm - 0.0) < 0.01, f"got {loss_otm}")
+
+
+# ============================================================
 # 运行
 # ============================================================
 if __name__ == "__main__":
@@ -502,6 +541,7 @@ if __name__ == "__main__":
     test_income_cert()
     test_helpers()
     test_leverage()
+    test_stress_loss_estimator()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

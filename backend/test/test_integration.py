@@ -465,6 +465,46 @@ def test_all_getters_no_error():
 
 
 # ============================================================
+# 7. 新增字段兼容性（underlying_market、stress loss 估算）
+# ============================================================
+def test_new_fields_and_helpers():
+    print("\n=== 新增字段与辅助函数 ===")
+
+    from backend.calculators.risk_reserve import estimate_otc_option_stress_loss
+
+    # OtcContract 新增 underlying_market
+    otc = ClientContract(
+        contract_type="call_option", direction="short", notional=1000,
+        underlying_type="index_component", underlying_market="CN",
+        option_type="call_option", premium_rate=5.0,
+        stress_loss=50, term_days=90
+    )
+    check("otc.underlying_market = CN", otc.get_otc_underlying_market() == "CN")
+
+    # HedgeTrade 新增 underlying_market
+    hedge = HedgeTrade(
+        tool_type="etf", direction="long", notional=200,
+        underlying_type="index_component", underlying_market="CN"
+    )
+    check("hedge.underlying_market = CN", hedge.get_tool_underlying_market() == "CN")
+
+    # 未指定时默认为 None，不破坏旧测试
+    otc_default = ClientContract(
+        contract_type="put_option", direction="buy", notional=1000,
+        underlying_type="general_stock"
+    )
+    check("otc.underlying_market default None", otc_default.get_otc_underlying_market() is None)
+
+    # stress loss 估算函数接入
+    loss = estimate_otc_option_stress_loss(
+        spot_price=100.0, strike_price=100.0,
+        contract_multiplier=100.0, contract_size=1000.0,
+        option_type="call_option"
+    )
+    check("stress loss estimator returns 200", math.isclose(loss, 200.0))
+
+
+# ============================================================
 # 运行
 # ============================================================
 if __name__ == "__main__":
@@ -478,6 +518,7 @@ if __name__ == "__main__":
     test_analyzer_e2e()
     test_math_consistency()
     test_all_getters_no_error()
+    test_new_fields_and_helpers()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

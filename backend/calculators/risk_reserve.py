@@ -14,6 +14,44 @@ from .ratios import RATES
 # 辅助函数
 # ============================================================
 
+def estimate_otc_option_stress_loss(
+    spot_price: float,
+    strike_price: float,
+    contract_multiplier: float,
+    contract_size: float,
+    option_type: str,
+) -> float:
+    """
+    根据标的价格、行权价、合约乘数与合约规模，估算卖出场外期权的 ±20% 压力测试最大损失。
+
+    【计算逻辑】
+      - 看涨期权（call）：标的价格上涨 20% 时，每单位亏损 = max(1.2×spot - strike, 0)
+      - 看跌期权（put）：标的价格下跌 20% 时，每单位亏损 = max(strike - 0.8×spot, 0)
+      - 总亏损（元） = 每单位亏损 × 合约乘数 × 合约规模
+      - 返回结果已转换为万元
+
+    Args:
+        spot_price: 标的当前价格（元）
+        strike_price: 期权行权价（元）
+        contract_multiplier: 合约乘数（元/点）
+        contract_size: 合约规模/份数（份）
+        option_type: "call_option" 或 "put_option"
+
+    Returns:
+        float: 压力测试最大损失（万元）
+    """
+    pressure_lower = spot_price * 0.80
+    pressure_upper = spot_price * 1.20
+
+    if option_type in ("call_option", "call"):
+        unit_loss = max(pressure_upper - strike_price, 0.0)
+    else:
+        unit_loss = max(strike_price - pressure_lower, 0.0)
+
+    total_loss_yuan = unit_loss * contract_multiplier * contract_size
+    return total_loss_yuan / 10000.0
+
+
 def _get_option_premium(otc: OtcContract) -> float:
     """获取场外期权的权利金绝对值 P（万元）"""
     return abs(otc.get_otc_cash_inflow())
