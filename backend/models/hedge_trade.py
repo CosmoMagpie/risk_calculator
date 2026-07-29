@@ -26,7 +26,15 @@ class HedgeTrade:
     """对应模块B：对冲工具"""
 
     # ===== 基础字段（所有对冲工具通用） =====
-    tool_type: str              # 工具类型字符串："etf" | "stock" | "futures" | "onsite_option" | "otc_hedge" | "private_fund"
+    tool_type: str              # 工具类型字符串：
+                                # "index_component" | "general_stock" | "restricted_stock" | "other_stock"
+                                # "equity_swap" | "interest_rate_swap"
+                                # "index_fund" | "other_equity_fund" | "monetary_fund" | "interest_rate_bond_index_fund" | "other_non_equity_fund"
+                                # "stock_index_future" | "treasury_future" | "bulk_commodity_future" | "stock_index_future"
+                                # "single_product(private fund)" | "collection_and_trust"
+                                # "bulk_commodity"
+                                # "onsite_option" "otc_option"
+
     direction: str              # 交易方向："long"=做多（买入） | "short"=做空（卖出）
     notional: float             # 名义价值/对冲总金额（万元）
     tool_code: Optional[str] = None  # 对冲工具 iFinD 代码（用于查价格、获取Greeks）
@@ -34,33 +42,34 @@ class HedgeTrade:
     # ===== 标的资产属性 =====
     underlying_type: Optional[str] = None  # 底层资产类型（如 index_component），ETF/股票时即为tool_type本身
     underlying_name: Optional[str] = None  # 对冲工具底层资产名称
-    underlying_code: Optional[str] = None  # 对冲工具底层资产代码（用于查价格、算相关性）
-
-    # ===== ETF现货字段 =====
-    cash_spent: Optional[float] = None     # ETF买入实际花费现金（万元），未指定时默认=名义金额
-
-    # ===== 股票现货字段 =====
-    stock_type: Optional[str] = None       # 股票类型：index_component | general_stock | restricted_stock | other_stock
+    underlying_code: Optional[str] = None  # 对冲工具底层资产iFinD代码（用于查价格、算相关性）
+    underlying_market: Optional[str] = None  # 底层资产市场（如 CN, HK, US, JP, etc.）
 
     # ===== 期货字段 =====
     futures_margin: Optional[float] = None      # 股指期货保证金绝对值（万元）
     futures_margin_rate: Optional[float] = None  # 股指期货保证金比例（%），如12%
-    future_type: Optional[str] = None           # 期货类型（如 "IF"=沪深300, "IC"=中证500）
-    future_delta: Optional[float] = None        # 期货Delta值（%），股指期货通常≈100%
 
-    # ===== 场内期权字段 =====
-    option_premium: Optional[float] = None   # 场内期权权利金（万元），买入期权支付的权利金
+    # ===== 期权字段 =====
     option_type: Optional[str] = None        # 期权类型："call_option"=看涨 | "put_option"=看跌
-    option_strike_price: Optional[float] = None  # 期权执行价（元）
+    premium_rate: Optional[float] = None        # 权利金比例（%），如5表示5%，权利金 = 名义本金 × 权利金比例
+    total_premium_amount: Optional[float] = None # 权利金总额（万元），直接指定总额时使用
+    single_premium_amount: Optional[float] = None # 单笔期权费（万元），配合合约份数使用
+    contract_multiplier: Optional[int] = None  # 合约乘数（元/点），类似股指期权每点对应多少元
+    contract_size: Optional[int] = None        # 合约份数（份）
+    exercise_price: Optional[float] = None       # 行权价（元）
+    option_delta: Optional[float] = None         # Delta值（%），如0.5=50%，用于计算Delta敞口
+    option_margin_amount: Optional[float] = None # 场外卖出期权保证金绝对值（万元），与margin_rate二选一
+    option_margin_rate: Optional[float] = None   # 场外卖出期权保证金比例（%）
     option_start_date: Optional[str] = None      # 期权起始日（"YYYY-MM-DD"）
     option_expiry_date: Optional[str] = None     # 期权到期日（"YYYY-MM-DD"）
-    option_delta: Optional[float] = None         # Delta值（%）
-    option_margin: Optional[float] = None        # 期权保证金金额（万元），卖出期权时需要缴纳保证金
-    option_margin_rate: Optional[float] = None   # 期权保证金比例（%）
 
-    # ===== 场外背对背对冲字段 =====
+    # ===== 场外背对背对冲特殊字段 =====
     # 【业务场景】券商与客户做了一笔场外期权后，找另一家金融机构做一笔完全反向的交易
     #           来转移风险，这称为"背对背平盘"（back-to-back hedging）
+
+
+    # 场外背对背和私募基金都需要调整，将上方将场内外期权合并了，用于计算风险资本准备
+
     otc_payment: Optional[float] = None         # 向平盘方支付的预付金/保证金（万元）
     pass_through_fee: Optional[float] = None    # 平盘成本（年化%），即支付给平盘方的费率
 
@@ -142,9 +151,9 @@ class HedgeTrade:
         """获取对冲工具 iFinD 代码"""
         return self.tool_code
 
-    def get_tool_stock_type(self) -> Optional[str]:
-        """获取对冲工具股票类型"""
-        return self.stock_type if self.stock_type is not None else None
+    def get_tool_underlying_type(self) -> str:
+        """获取对冲工具底层资产类型"""
+        return self.underlying_type
 
     def get_tool_underlying_name(self) -> str:
         """获取对冲工具底层资产名称"""
@@ -154,9 +163,9 @@ class HedgeTrade:
         """获取对冲工具底层资产代码"""
         return self.underlying_code
 
-    def get_cash_spent(self) -> Optional[float]:
-        """获取ETF买入实际花费现金（万元）"""
-        return self.cash_spent
+    def get_tool_underlying_market(self) -> str:
+        """获取对冲工具底层资产市场"""
+        return self.underlying_market
 
     def get_futures_margin(self) -> Optional[float]:
         """获取期货保证金金额（万元）"""
@@ -166,17 +175,45 @@ class HedgeTrade:
         """获取期货保证金比例（%）"""
         return self.futures_margin_rate
     
-    def get_option_premium(self) -> Optional[float]:
-        """获取期权权利金（万元）"""
-        return self.option_premium
-
-    def get_option_type(self) -> Optional[str]:
+    def get_option_type(self) -> str:
         """获取期权类型"""
         return self.option_type
 
-    def get_option_strike_price(self) -> Optional[float]:
-        """获取期权执行价（元）"""
-        return self.option_strike_price
+    def get_total_premium_amount(self) -> Optional[float]:
+        """获取期权权利金（万元）"""
+        return self.total_premium_amount
+
+    def get_single_premium_amount(self) -> Optional[float]:
+        """获取单笔期权费（万元）"""
+        return self.single_premium_amount
+
+    def get_option_premium_rate(self) -> Optional[float]:
+        """获取期权权利金比例（%）"""
+        return self.premium_rate
+    
+    def get_option_contract_multiplier(self) -> Optional[int]:
+        """获取期权合约乘数（元/点）"""
+        return self.contract_multiplier
+
+    def get_option_contract_size(self) -> Optional[int]:
+        """获取期权合约份数（份）"""
+        return self.contract_size
+
+    def get_option_exercise_price(self) -> Optional[float]:
+        """获取期权行权价（元）"""
+        return self.exercise_price
+
+    def get_option_delta(self) -> Optional[float]:
+        """获取期权Delta值（%）"""
+        return self.option_delta
+
+    def get_option_margin_amount(self) -> Optional[float]:
+        """获取期权保证金金额（万元）"""
+        return self.option_margin_amount
+
+    def get_option_margin_rate(self) -> Optional[float]:
+        """获取期权保证金比例（%）"""
+        return self.option_margin_rate
 
     def get_option_start_date(self) -> Optional[str]:
         """获取期权起始日（"YYYY-MM-DD"）"""
@@ -185,18 +222,6 @@ class HedgeTrade:
     def get_option_expiry_date(self) -> Optional[str]:
         """获取期权到期日（"YYYY-MM-DD"）"""
         return self.option_expiry_date
-
-    def get_option_delta(self) -> Optional[float]:
-        """获取期权Delta值（%）"""
-        return self.option_delta
-
-    def get_option_margin(self) -> Optional[float]:
-        """获取期权保证金金额（万元）"""
-        return self.option_margin
-
-    def get_option_margin_rate(self) -> Optional[float]:
-        """获取期权保证金比例（%）"""
-        return self.option_margin_rate
 
     def get_otc_payment(self) -> Optional[float]:
         """获取场外背对背对冲预付金（万元）"""

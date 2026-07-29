@@ -42,19 +42,19 @@ class OtcContract:
     underlying_type: Optional[str]         # 标的资产分类，影响风险系数：index_component/general_stock/restricted_stock/other_stock
     underlying_name: Optional[str] = None  # 标的资产名称（如"中证1000"），可选
     underlying_code: Optional[str] = None  # 标的资产iFinD代码（如"000852.SH"），可选，用于查价格算相关性
+    underlying_market: Optional[str] = None  # 标的资产市场，影响风险系数：CN=A股，US=美股，HK=港股，EN=英股，Other=其他
 
     # ===== 期权专有字段 =====
     option_type: Optional[str] = None        # 期权类型："call_option"=看涨 | "put_option"=看跌
     premium_rate: Optional[float] = None        # 权利金比例（%），如5表示5%，权利金 = 名义本金 × 权利金比例
     total_premium_amount: Optional[float] = None # 权利金总额（万元），直接指定总额时使用
     single_premium_amount: Optional[float] = None # 单笔期权费（万元），配合合约份数使用
-    contract_multiplier: Optional[float] = None  # 合约乘数（元/点），类似股指期权每点对应多少元
-    contract_size: Optional[float] = None        # 合约份数（份）
+    contract_multiplier: Optional[int] = None  # 合约乘数（元/点），类似股指期权每点对应多少元
+    contract_size: Optional[int] = None        # 合约份数（份）
     exercise_price: Optional[float] = None       # 行权价（元）
     option_delta: Optional[float] = None         # Delta值（%），如0.5=50%，用于计算Delta敞口
     option_margin_amount: Optional[float] = None # 场外卖出期权保证金绝对值（万元），与margin_rate二选一
     option_margin_rate: Optional[float] = None   # 场外卖出期权保证金比例（%）
-    stress_loss: Optional[float] = None          # 压力测试最大损失（万元），卖出场外期权专用
 
     # ===== 收益互换专有字段 =====
     equity_swap_margin_rate: Optional[float] = None         # 保证金比例（%），如10表示客户缴纳10%保证金
@@ -102,6 +102,10 @@ class OtcContract:
     def get_otc_underlying_code(self) -> Optional[str]:
         """获取标的资产代码"""
         return self.underlying_code
+
+    def get_otc_underlying_market(self) -> Optional[str]:
+        """获取标的资产市场"""
+        return self.underlying_market
 
     def get_option_type(self) -> Optional[str]:
         """获取期权类型"""
@@ -162,6 +166,10 @@ class OtcContract:
     def get_funds_raised(self) -> Optional[float]:
         """获取募集资金总额"""
         return self.funds_raised
+
+    def get_is_float_income(self) -> Optional[bool]:
+        """获取收益凭证是否为浮动收益"""
+        return self.is_float_income
 
     def get_income_certificate_delta(self) -> Optional[float]:
         """获取OC Delta值"""

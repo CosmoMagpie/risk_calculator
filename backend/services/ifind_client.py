@@ -9,10 +9,11 @@ from typing import Dict, List, Optional
 
 from iFinDPy import *
 
+LOGIN_INFO = {'user_name': 'glzq703', 'password': '96998XuY'}
 
 # =============== iFinD 数据接口函数 ===============
 
-def ifind_login():
+def ifind_login(user_name: str = LOGIN_INFO['user_name'], password: str = LOGIN_INFO['password']):
     """
     登录同花顺 iFinD 数据终端
 
@@ -20,7 +21,7 @@ def ifind_login():
     Returns:
         bool: 登录成功返回 True，失败返回 False
     """
-    thsLogin = THS_iFinDLogin('glzq703','96998XuY')
+    thsLogin = THS_iFinDLogin(user_name, password)
     print(thsLogin)
     if thsLogin in {0, -201}:
         print('登录成功')
@@ -56,7 +57,7 @@ def get_underlying_price_series(underlying_code: str,
 
     try:
         # 调用 THS_HQ 获取行情数据
-        result = THS_HQ(underlying_code, price_type, 'fill:omit', start_date, end_date)
+        result = THS_HQ(underlying_code, price_type, 'fill:Omit', start_date, end_date)
         if result is None:
             print("THS_DS 返回 None")
             return {underlying_code: []}
@@ -64,7 +65,6 @@ def get_underlying_price_series(underlying_code: str,
             print(f"获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
             return {underlying_code: []}
         data = pd.DataFrame(result.data)
-        THS_iFinDLogout()
         if data.empty:
             print("获取数据为空")
             return {underlying_code: []}
@@ -103,54 +103,6 @@ def calculate_correlation_between_price_series(otc_code: str, otc_prices: Dict[s
     hedge_aligned = hedge_series.iloc[:min_len]
     corr = otc_aligned.corr(hedge_aligned)
     return corr if corr is not None else np.nan
-
-
-def get_onsite_option_greeks(option_code: str, greek_letter: str = 'delta') -> Optional[float]:
-    """
-    获取场内期权希腊字母值（通过同花顺 iFinD API）
-
-    Args:
-        option_code: 期权代码
-        greek_letter: 希腊字母，如 'delta', 'gamma', 'vega', 'theta', 'rho'
-    Returns:
-        float: 期权当日希腊字母值，若当天交易未结束，返回前一交易日值；获取失败返回 None
-    """
-    if not ifind_login():
-        print("登录失败")
-        return None
-    # 5大常用希腊字母映射字典
-    map_dict = {'delta': 'ths_delta_option','gamma': 'ths_gamma_option','vega': 'ths_vega_option','theta': 'ths_theta_option','rho': 'ths_rho_option'}
-    greek_wanted = map_dict.get(greek_letter, None)
-    # 当前日期和上一交易日的保守自然日（-14天）
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    conservative_date = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
-    if greek_wanted is None:
-        print(f"未找到{greek_letter}对应的greeks值")
-        return None
-
-    try:
-        greeklist = THS_DS(option_code, greek_wanted,'100','Days:Tradedays,Fill:Blank', conservative_date, current_date)
-        if greeklist is None:
-            print("THS_DS 返回 None")
-            return None
-        if hasattr(greeklist, 'errorcode') and greeklist.errorcode != 0:
-            print(f"获取数据失败，错误码: {greeklist.errorcode}, 错误信息: {greeklist.errmsg}")
-            return None
-        data = pd.DataFrame(greeklist.data)
-        THS_iFinDLogout()
-        if data.empty:
-            print("获取数据为空")
-            return None
-        greek_value_list = data[greek_wanted].tolist()
-        if np.isnan(greek_value_list[-1]):
-            greek_value = greek_value_list[-2]
-        else:
-            greek_value = greek_value_list[-1]
-        return greek_value
-
-    except Exception as e:
-        print(f"获取期权greeks值失败: {e}")
-        return None
 
 
 # ==== 获取标的价格函数组，服务于计算压力测试最大损失 ====
@@ -241,7 +193,6 @@ def get_realtime_price(ifind_code: str, market: str) -> Optional[float]:
                 print(f"THS_RQ 获取数据失败，错误码: {result.errorcode}, 错误信息: {result.errmsg}")
             return None
         data = pd.DataFrame(result.data)
-        THS_iFinDLogout()
         
         # 检查数据是否为空
         if data.empty:
@@ -260,7 +211,7 @@ def get_realtime_price(ifind_code: str, market: str) -> Optional[float]:
         return None
 
 
-def get_latest_close_price(ifind_code: str, spot_type: str, market: str, start_date: str, end_date: str) -> Optional[float]:
+def get_latest_close_price(ifind_code: str, spot_type: str, start_date: str, end_date: str, market: str = 'CN') -> Optional[float]:
     """
     获取最新的收盘价（非交易时间使用）
     
@@ -325,6 +276,55 @@ def get_latest_close_price(ifind_code: str, spot_type: str, market: str, start_d
     except Exception as e:
         print(f"获取历史价格失败: {e}")
         return None
+
+
+# ====== 期权信息获取函数 ======
+def get_onsite_option_greeks(option_code: str, greek_letter: str = 'delta') -> Optional[float]:
+    """
+    获取场内期权希腊字母值（通过同花顺 iFinD API）
+
+    Args:
+        option_code: 期权代码
+        greek_letter: 希腊字母，如 'delta', 'gamma', 'vega', 'theta', 'rho'
+    Returns:
+        float: 期权当日希腊字母值，若当天交易未结束，返回前一交易日值；获取失败返回 None
+    """
+    if not ifind_login():
+        print("登录失败")
+        return None
+    # 5大常用希腊字母映射字典
+    map_dict = {'delta': 'ths_delta_option','gamma': 'ths_gamma_option','vega': 'ths_vega_option','theta': 'ths_theta_option','rho': 'ths_rho_option'}
+    greek_wanted = map_dict.get(greek_letter, None)
+    # 当前日期和上一交易日的保守自然日（-14天）
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    conservative_date = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    if greek_wanted is None:
+        print(f"未找到{greek_letter}对应的greeks值")
+        return None
+
+    try:
+        greeklist = THS_DS(option_code, greek_wanted,'100','Days:Tradedays,Fill:Blank', conservative_date, current_date)
+        if greeklist is None:
+            print("THS_DS 返回 None")
+            return None
+        if hasattr(greeklist, 'errorcode') and greeklist.errorcode != 0:
+            print(f"获取数据失败，错误码: {greeklist.errorcode}, 错误信息: {greeklist.errmsg}")
+            return None
+        data = pd.DataFrame(greeklist.data)
+        if data.empty:
+            print("获取数据为空")
+            return None
+        greek_value_list = data[greek_wanted].tolist()
+        if np.isnan(greek_value_list[-1]):
+            greek_value = greek_value_list[-2]
+        else:
+            greek_value = greek_value_list[-1]
+        return greek_value
+
+    except Exception as e:
+        print(f"获取期权greeks值失败: {e}")
+        return None
+
 
 # =============== 以下为测试代码 ===============
 

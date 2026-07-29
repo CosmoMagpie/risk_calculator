@@ -11,19 +11,29 @@ RATES = {
     "general_stock": 0.25,        # 一般上市股票 25%
     "restricted_stock": 0.50,     # 流通受限股票 50%
     "other_stock": 0.80,          # 其他股票 80%
-    "stock_index_future": 0.30,   # 股指期货 30%
-    "equity_swap": 0.30,          # 权益互换 30%
+    "index_fund": 0.05,           # 指数基金 5%
+    "other_equity_fund": 0.10,    # 其他权益类基金 10%
+    "stock_index_future": 0.30 * 0.15,   # 股指期货 30% * 15%
+    "equity_swap": 0.30 * 0.10,          # 权益互换 30% * 10%
     "equity_short_option": 0.30,  # 权益类卖出期权 30%
-    "equtity_long_option": 1.00,  # 权益类买入期权 100%（注意拼写：equtity→equity）
+    "equity_long_option": 1.00,  # 权益类买入期权 100%
     "monetary_fund": 0.05,        # 货币基金 5%
     "interest_rate_bond_index_fund": 0.06, # 利率债指数基金 6%
-    "other_non_equity_fund": 0.10,  # 其他非权益类基金
-    "treasury_future_and_interest_rate_swap": 0.20, # 国债期货和利率互换 20%
+    "other_non_equity_fund": 0.10,  # 其他非权益类基金 10%
+    "treasury_future": 0.20 * 0.05, # 国债期货 20% * 5%
+    "interest_rate_swap": 0.20 * 0.03,  # 利率互换 20% * 3%
     "single_product": 0.50,        # 单一产品 50%
+    "collection_and_trust": 0.05, # 集合及信托 5%，先按照现金管理类来算，不考虑分级产品非优先级和其他
     "bulk_commodity": 0.08,       # 大宗商品 8%
-    "bulk_commodity_derivatives": 0.20,     # 大宗商品衍生品 20%
+    "bulk_commodity_derivatives": 0.20 * 0.10,     # 大宗商品衍生品 20% * 10%
     "non_equity_short_option": 0.20,  # 非权益类卖出期权 20%
     "non_equity_long_option": 1.00,  # 非权益类买入期权 100%
+
+
+    # 有效对冲情况下的特殊情况
+    "effective_hedge": {
+        'equity_securities_and_derivatives': 0.05,
+        'non_equity_securities_and_derivatives': 0.01}
 }
 
 # ===================== RSF 系数（所需稳定资金） =====================
