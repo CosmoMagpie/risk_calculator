@@ -472,7 +472,7 @@ def test_leverage():
     # 场内卖出期权对冲
     lev8 = calc_leverage_impact(otc_opt, [
         make_hedge(tool_type="onsite_option", notional=6000.0, direction="short",
-                   option_delta=0.5),
+                   option_delta=-0.5),
     ], net_day1_cash=0.0)
     # Δ表内 = 0 (假设)
     # Δ表外_client = 1000 (S_short)

@@ -169,10 +169,12 @@ class HedgeTrade:
         is_long = 1 if self.direction == "long" else -1
 
         # --- 场内期权Delta ---
+        # option_delta 为「带符号的头寸 Delta」：买入看涨/卖出看跌为正，卖出看涨/买入看跌为负。
+        # 若用户未填写，则按平值期权默认系数 × call/put 符号 × 头寸方向 推导默认值。
         if self.tool_type == "onsite_option":
             is_call = 1 if self.option_type == "call_option" else -1
             if self.option_delta is not None:
-                return self.option_delta * self.notional * is_call * is_long
+                return self.option_delta * self.notional
             return DEFAULT_CONFIG["trade"]["atm_option_delta"] * self.notional * is_call * is_long
 
         # --- 期货Delta ---

@@ -155,14 +155,14 @@ def test_client_contract():
     check("buy call delta = 0.6 × 1000 = 600",
           math.isclose(da, 600.0))
 
-    # 卖出看跌期权 Delta（由于 is_call=-1, is_long=-1，乘积为 +1）
+    # 卖出看跌期权：头寸 Delta 为正（与买入看跌符号相反）
     otc_short_put = ClientContract(
         contract_type="put_option", direction="short", notional=500,
         underlying_type="index_component",
         option_type="put_option", option_delta=0.4
     )
     da2 = otc_short_put.get_otc_delta_amount()
-    check("short put delta: is_call=-1, is_long=-1 → delta > 0", da2 > 0)
+    check("short put delta: 头寸 Delta = +0.4 × 500 = 200", math.isclose(da2, 200.0))
 
     # ---- get_income_certificate_rate（回归 P1 修复验证）----
     rate = otc.get_income_certificate_rate()
@@ -219,7 +219,7 @@ def test_hedge_trade():
 
     # ---- Onsite option delta ----
     da = opt_long.get_hedge_delta_amount()
-    # long call: is_long=1, is_call=1, option_delta=0.5 → 0.5 × 300 = 150
+    # 买入看涨期权：头寸 Delta = +0.5 × 300 = 150
     check("onsite option long call delta = 150", math.isclose(da, 150.0))
 
     # ---- OTC hedge ----

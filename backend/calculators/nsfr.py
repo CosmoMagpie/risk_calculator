@@ -49,8 +49,8 @@ def _calc_hedge_rsf(hedge_list: List[HedgeTrade]) -> float:
         # --- 场内期权（仅卖出期权计入RSF）---
         elif h.tool_type == "onsite_option":
             if h.direction == "short":
-                # Delta金额 = Delta系数 × 名义价值
-                delta_amount = (h.option_delta or 0.5) * h.notional
+                # Delta金额 = |头寸Delta系数| × 名义价值（卖出期权敞口取绝对值）
+                delta_amount = abs(h.option_delta or 0.5) * h.notional
                 rsf += delta_amount * RSF_RATES["onsite_short_option"]   # Delta × 15% × 12%
 
         # --- 场外背对背对冲（按互换 1% 计提）---

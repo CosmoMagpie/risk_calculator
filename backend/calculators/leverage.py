@@ -88,7 +88,7 @@ def _calc_hedge_off_balance(hedge_list: List[HedgeTrade], ct: str, is_swap_pen: 
 
         elif h.tool_type == "onsite_option":
             if h.direction == "short":
-                delta_amount = (h.option_delta or 0.5) * h.notional
+                delta_amount = abs(h.option_delta or 0.5) * h.notional
                 total += delta_amount * 0.15
 
         elif h.tool_type == "otc_hedge":

@@ -284,10 +284,12 @@ class OtcContract:
         is_long = 1 if self.direction in ("long", "buy") else -1
 
         # --- 期权Delta ---
+        # option_delta 为「带符号的头寸 Delta」：买入看涨/卖出看跌为正，卖出看涨/买入看跌为负。
+        # 若用户未填写，则按平值期权默认系数 × call/put 符号 × 头寸方向 推导默认值。
         if "option" in self.contract_type:
             is_call = 1 if self.option_type == "call_option" else -1  # 看涨=+1, 看跌=-1
             if self.option_delta is not None:
-                return self.option_delta * self.notional * is_call * is_long
+                return self.option_delta * self.notional
             # 默认使用平值期权Delta=0.5，乘以 call/put 和 long/short 方向
             return DEFAULT_CONFIG["client"]["atm_option_delta"] * self.notional * is_call * is_long
 
