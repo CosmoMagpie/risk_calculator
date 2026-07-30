@@ -388,12 +388,12 @@ def test_option_greeks():
     for opt_code in test_options:
         print(f"\n    代码: {opt_code}")
         for g in greek_types:
-            val = get_onsite_option_greeks(opt_code, g)
+            val, err = get_onsite_option_greeks(opt_code, g)
             if val is not None:
                 print(f"      {g:6s} = {val:.6f}")
                 check(f"7a iFinD {opt_code} {g}", True)
             else:
-                print(f"      {g:6s} = None")
+                print(f"      {g:6s} = None (错误: {err})")
                 check(f"7a iFinD {opt_code} {g}", False)
         # 只测第一种代码即可，无需重复
         break
@@ -404,11 +404,11 @@ def test_option_greeks():
     S, K, T = 3.02, 3.00, 30
 
     for g in greek_types:
-        v_call = get_onsite_option_greeks(
+        v_call, _ = get_onsite_option_greeks(
             None, g, spot_price=S, strike_price=K,
             days_to_expiry=T, option_type='call'
         )
-        v_put = get_onsite_option_greeks(
+        v_put, _ = get_onsite_option_greeks(
             None, g, spot_price=S, strike_price=K,
             days_to_expiry=T, option_type='put'
         )
@@ -417,11 +417,11 @@ def test_option_greeks():
         check(f"7b BS {g} put 非空", v_put is not None)
 
     # 7c: BS 合理性校验 — call delta + |put delta| ≈ 1
-    d_call = get_onsite_option_greeks(
+    d_call, _ = get_onsite_option_greeks(
         None, 'delta', spot_price=S, strike_price=K,
         days_to_expiry=T, option_type='call'
     )
-    d_put = get_onsite_option_greeks(
+    d_put, _ = get_onsite_option_greeks(
         None, 'delta', spot_price=S, strike_price=K,
         days_to_expiry=T, option_type='put'
     )
@@ -429,14 +429,14 @@ def test_option_greeks():
     check("7c BS delta 校验 (call-put≈1)", abs((d_call - d_put) - 1.0) < 0.01)
 
     # 7d: 空参数边界
-    val_none = get_onsite_option_greeks(None, "delta")
+    val_none, _ = get_onsite_option_greeks(None, "delta")
     check("7d get_onsite_option_greeks(None, delta) 无参数时返回 None", val_none is None)
 
-    val_empty = get_onsite_option_greeks("", "delta")
+    val_empty, _ = get_onsite_option_greeks("", "delta")
     check("7d get_onsite_option_greeks('', delta) 空字符串时返回 None", val_empty is None)
 
     # 7e: 缺失 BS 参数也返回 None
-    val_partial = get_onsite_option_greeks(
+    val_partial, _ = get_onsite_option_greeks(
         None, 'delta', spot_price=3.0  # 缺少 strike 和 days
     )
     check("7d 缺少 BS 参数时返回 None", val_partial is None)

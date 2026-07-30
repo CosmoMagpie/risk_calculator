@@ -383,7 +383,7 @@ def get_onsite_option_greeks(
     risk_free_rate: float = 0.02,
     days_to_expiry: Optional[int] = None,
     option_type: str = 'call',
-) -> Optional[float]:
+):
     """
     获取场内期权希腊字母值
 
@@ -399,7 +399,8 @@ def get_onsite_option_greeks(
         option_type: 'call' | 'put'，默认 'call'
 
     Returns:
-        float: 希腊字母值，获取失败返回 None
+        (Optional[float], Optional[str]): (希腊字母值, 错误信息)。
+            成功时 error_msg 为 None；失败时 value 为 None，error_msg 含失败原因。
     """
     # ---- 优先尝试 iFinD API ----
     if option_code and str(option_code).strip() != "" and ifind_login():
@@ -412,7 +413,9 @@ def get_onsite_option_greeks(
         }
         greek_wanted = map_dict.get(greek_letter)
         if greek_wanted is None:
-            print(f"[iFinD] 不支持的希腊字母: {greek_letter}")
+            msg = f"不支持的希腊字母: {greek_letter}"
+            print(f"[iFinD] {msg}")
+            return None, msg
         else:
             # 尝试多种代码格式：原代码 → 原代码.SH → (已带后缀则不再追加)
             code = str(option_code).strip()
@@ -422,6 +425,8 @@ def get_onsite_option_greeks(
 
             current_date = datetime.now().strftime('%Y-%m-%d')
             conservative_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+
+            iFind_errors = []  # 收集各变体尝试的错误信息
 
             for variant in code_variants:
                 try:
@@ -434,12 +439,17 @@ def get_onsite_option_greeks(
                         current_date,
                     )
                     if result is None:
+                        iFind_errors.append(f"代码 {variant}: THS_DS 返回 None")
                         continue
                     if hasattr(result, 'errorcode') and result.errorcode != 0:
+                        err_code = result.errorcode
+                        err_msg = getattr(result, 'errmsg', '未知错误')
+                        iFind_errors.append(f"代码 {variant}: 错误码={err_code}, 信息={err_msg}")
                         continue
 
                     data = pd.DataFrame(result.data)
                     if data.empty or greek_wanted not in data.columns:
+                        iFind_errors.append(f"代码 {variant}: 返回数据为空或无 {greek_wanted} 列")
                         continue
 
                     values = pd.to_numeric(data[greek_wanted].tolist(), errors='coerce')
@@ -448,23 +458,32 @@ def get_onsite_option_greeks(
                             if variant != code:
                                 print(f"[iFinD] Greeks 通过 {variant} 获取成功 "
                                       f"(原始代码 {code} 无有效值)")
-                            return float(val)
+                            return float(val), None
 
                 except Exception as e:
+                    iFind_errors.append(f"代码 {variant}: 异常={e}")
                     continue
 
-            # 所有尝试均失败
-            print(f"[iFinD] {option_code} 的 {greek_wanted} 获取失败: "
-                  "所有代码格式均无有效数据，iFinD 当前账号可能不提供期权 Greeks")
+            # 所有尝试均失败，汇总错误信息
+            error_detail = "; ".join(iFind_errors) if iFind_errors else "所有代码格式均无有效数据"
+            msg = (f"期权代码 {option_code} 的 {greek_letter} 获取失败: {error_detail}。"
+                   f"请确认: 1) 代码是否正确 2) iFinD 终端是否正常 3) 该期权合约数据是否可用")
+            print(f"[iFinD] {msg}")
+            return None, msg
+
+    elif option_code and str(option_code).strip() != "" and not ifind_login():
+        return None, "iFinD 未登录，请先在侧边栏登录 iFinD 终端"
 
     # ---- 回退：本地 Black-Scholes 模型 ----
     if spot_price and strike_price and days_to_expiry and spot_price > 0 and strike_price > 0:
-        return _calc_bs_greek(
+        bs_val = _calc_bs_greek(
             spot_price, strike_price, risk_free_rate,
             days_to_expiry, greek_letter, option_type,
         )
+        if bs_val is not None:
+            return bs_val, None  # BS 本地计算成功，无错误
 
-    return None
+    return None, "未提供期权代码，且缺少本地 BS 模型所需参数（标的价格、行权价、到期天数）"
 
 
 def _calc_bs_greek(

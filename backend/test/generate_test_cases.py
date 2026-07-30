@@ -56,13 +56,13 @@ def _mock_corr(otc_code, otc_prices, hedge_code, hedge_prices):
 def _mock_greeks(option_code: str, greek_letter: str = 'delta'):
     """模拟场内期权 Greeks；仅对看起来像合约编码的代码返回固定值，否则模拟 iFinD 返回 None。"""
     if not option_code or not isinstance(option_code, str):
-        return None
+        return None, "Mock: 期权代码为空或无效"
     code = option_code.strip()
     # 模拟真实 iFinD：8 位数字合约编码视为有效，其他视为无效
     is_valid = code.isdigit() and len(code) == 8
     if is_valid and greek_letter.lower() == 'delta':
-        return 0.65
-    return None
+        return 0.65, None
+    return None, "Mock: 无效期权代码"
 
 
 if not IFIND_AVAILABLE:

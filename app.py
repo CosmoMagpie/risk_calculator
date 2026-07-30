@@ -380,7 +380,7 @@ with tab2:
             stock_type_value = None  # ETF/个股的标的资产分类，通过下方下拉框赋值
             etf_name = etf_code = stock_name = stock_code = future_ul_code = None
             option_code = option_ul_code = otc_underlying_code = None
-            option_margin = option_margin_rate = option_strike_price = None
+            option_margin = option_margin_rate = None
             futures_margin_rate = future_delta = future_type = None
 
             if tool_type == "ETF现货":
@@ -440,67 +440,71 @@ with tab2:
                     ["看涨期权", "看跌期权"],
                     key="new_option_type"
                 )
-                col_op1, col_op2 = st.columns(2)
-                with col_op1:
-                    option_premium = st.number_input(
-                        "权利金收支（万元）",
-                        value=tool_notional * DEFAULT_CONFIG['client']['option_premium_rate'],
-                        key="new_option_premium"
-                    )
-                with col_op2:
-                    option_strike_price = st.number_input(
-                        "行权价（元）",
-                        value=0.0,
-                        step=0.01,
-                        key="new_option_strike_price",
-                        help="用于本地 Black-Scholes 估算 Greeks（iFinD 失败时回退）",
-                    )
-                    if option_strike_price == 0.0:
-                        option_strike_price = None
+                option_premium = st.number_input(
+                    "权利金收支（万元）",
+                    value=tool_notional * DEFAULT_CONFIG['client']['option_premium_rate'],
+                    key="new_option_premium"
+                )
 
-                # ---- 通过 iFinD 自动获取 Delta ----
-                st.caption("填写「场内期权代码」后可点击按钮从 iFinD 获取实时 Delta；获取失败可手动修改")
+                # ---- 通过 iFinD 获取 Delta ----
                 option_code = st.text_input("场内期权代码", placeholder="如：10011855", key="new_option_code")
                 option_ul_code = st.text_input("标的代码", placeholder="如：510050.SH", key="option_ul_code")
 
-                if "fetched_option_delta" not in st.session_state:
-                    st.session_state["fetched_option_delta"] = None
-                if "fetched_option_code" not in st.session_state:
-                    st.session_state["fetched_option_code"] = ""
+                if "ifind_delta_msg" not in st.session_state:
+                    st.session_state["ifind_delta_msg"] = None
 
-                if st.button("从 iFinD 获取 Delta", key="fetch_delta_btn"):
-                    if option_code and option_code.strip():
-                        try:
-                            fetched = get_onsite_option_greeks(option_code.strip(), "delta")
-                            if fetched is not None:
-                                # iFinD 返回的是期权合约本身的 Delta（看涨为正、看跌为负），
-                                # 需根据头寸方向（买入=+1，卖出=-1）转换为「头寸 Delta」后回填。
-                                position_direction = 1 if tool_direction == "买入" else -1
-                                position_delta = position_direction * float(fetched)
-                                st.session_state["fetched_option_delta"] = position_delta
-                                st.session_state["fetched_option_code"] = option_code.strip()
-                                st.success(f"iFinD 合约 Delta = {fetched:.4f}，已按「{tool_direction}」转换为头寸 Delta = {position_delta:.4f} 并回填")
-                            else:
-                                st.warning("iFinD 未返回有效 Delta，请检查代码或登录状态，并手动填写")
-                        except Exception as e:
-                            st.error(f"获取 Greeks 失败：{e}")
+                ifind_ok = get_ifind_login_status().get("logged_in", False)
+
+                col_btn1, col_btn2 = st.columns([1, 3])
+                with col_btn1:
+                    if st.button("📡 获取 Delta", key="fetch_delta_btn",
+                                 help="从 iFinD 获取该期权的实时 Delta 并自动填入下方输入框"):
+                        if not option_code or not option_code.strip():
+                            st.session_state["ifind_delta_msg"] = ("error", "请先填写场内期权代码")
+                        elif not ifind_ok:
+                            st.session_state["ifind_delta_msg"] = ("error",
+                                "iFinD 未登录，请先在侧边栏登录 iFinD 终端")
+                        else:
+                            try:
+                                fetched, err_msg = get_onsite_option_greeks(option_code.strip(), "delta")
+                                if fetched is not None:
+                                    position_sign = 1 if tool_direction == "买入" else -1
+                                    position_delta = position_sign * float(fetched)
+                                    # 直接写入 number_input 的 key，触发界面刷新
+                                    st.session_state["new_option_delta"] = position_delta
+                                    st.session_state["ifind_delta_msg"] = ("success",
+                                        f"合约 Delta = {fetched:.4f}, 头寸 Delta = {position_delta:.4f}，已填入下方输入框")
+                                else:
+                                    st.session_state["ifind_delta_msg"] = ("error", err_msg)
+                            except Exception as e:
+                                st.session_state["ifind_delta_msg"] = ("error", f"获取异常：{e}")
+                with col_btn2:
+                    if not ifind_ok:
+                        st.caption("⚠️ 请先在侧边栏登录 iFinD，再点击按钮获取 Delta")
+
+                # 显示状态信息
+                msg = st.session_state.get("ifind_delta_msg")
+                if msg is not None:
+                    level, text = msg
+                    if level == "success":
+                        st.success(f"✅ {text}")
+                    elif level == "error":
+                        st.error(f"❌ {text}")
                     else:
-                        st.warning("请先填写场内期权代码")
+                        st.info(f"ℹ️ {text}")
 
                 # ---- Delta 输入（带符号校验）----
-                # 如果刚获取了对应代码的 Delta，以 iFinD 值作为默认值；否则按方向估算符号
-                if st.session_state["fetched_option_delta"] is not None and st.session_state["fetched_option_code"] == option_code:
-                    suggested_delta = st.session_state["fetched_option_delta"]
-                else:
-                    suggested_delta = DEFAULT_CONFIG['client']['atm_option_delta']
+                # 初始化默认值：仅在 session_state 中尚无此 key 时写入默认值
+                if "new_option_delta" not in st.session_state:
+                    default_delta = DEFAULT_CONFIG['client']['atm_option_delta']
                     if option_type == "看跌期权" and tool_direction == "买入":
-                        suggested_delta = -suggested_delta
+                        default_delta = -default_delta
                     elif option_type == "看涨期权" and tool_direction == "卖出":
-                        suggested_delta = -suggested_delta
+                        default_delta = -default_delta
+                    st.session_state["new_option_delta"] = default_delta
 
                 option_delta = st.number_input(
                     "Delta（系数，如 0.50=50%）",
-                    value=suggested_delta,
                     key="new_option_delta",
                     help="期权价格对标的资产价格的敏感度，非百分比。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。如 50% Delta 请填入 0.50"
                 )
@@ -575,7 +579,6 @@ with tab2:
                     "option_premium": option_premium,
                     "option_delta": option_delta,
                     "option_type": CN_OPTION_TYPE.get(option_type if tool_type == "场内期权" else None),
-                    "option_strike_price": option_strike_price,
                     "option_margin": option_margin,
                     "option_margin_rate": option_margin_rate / 100.0 if option_margin_rate is not None else None,
                     "otc_payment": otc_payment,

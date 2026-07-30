@@ -1,6 +1,6 @@
 # 场外衍生品风控影响测算 — 典型测试样例
 
-> 生成时间：2026-07-30 13:45:35
+> 生成时间：2026-07-30 14:51:48
 > iFinD 终端状态：可用（已登录）
 > 公司基准参数来源：[backend/config.py](file:///e:/Desktop/risk_cal2/backend/config.py)
 
