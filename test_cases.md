@@ -1,6 +1,6 @@
 # 场外衍生品风控影响测算 — 典型测试样例
 
-> 生成时间：2026-07-29 14:37:42
+> 生成时间：2026-07-30 13:45:35
 > iFinD 终端状态：可用（已登录）
 > 公司基准参数来源：[backend/config.py](file:///e:/Desktop/risk_cal2/backend/config.py)
 
@@ -25,18 +25,18 @@
 
 字段 | 值
 --- | ---
-contract_type | call_option
-direction | short
-expected_yield | 0.08
-notional | 10000.0
-option_delta | 0.72
-option_type | call_option
-premium_rate | 5.0
-stress_loss | 200.0
-term_days | 180
-underlying_code | 000300.SH
-underlying_name | 沪深300指数
-underlying_type | index_component
+contract_type（合约类型） | call_option（看涨期权）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.08
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.72
+option_type（期权类型） | call_option（看涨期权）
+premium_rate（权利金率） | 5.0
+stress_loss（压力损失） | 200.0
+term_days（期限/天） | 180
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -44,13 +44,13 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-cash_spent | 9000.0
-direction | long
-notional | 9000.0
-tool_type | etf
-underlying_code | 
-underlying_name | 沪深300ETF
-underlying_type | index_component
+cash_spent（现金支出） | 9000.0
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 9000.0
+tool_type（工具类型） | etf（ETF）
+underlying_code（标的代码） | 
+underlying_name（标的名称） | 沪深300ETF
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模型输出
 
@@ -68,10 +68,10 @@ underlying_type | index_component
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 148.4021% | -0.5386% | safe | ≥100% |
-| NSFR | 141.0645% | 140.9981% | -0.0664% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.5000% | +0.0014% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2217.4966% | -11.6926% | safe | ≥100% |
+| LCR | 148.9407% | 148.4021% | -0.5386% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.9981% | -0.0664% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.5000% | +0.0014% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2217.4966% | -11.6926% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
@@ -111,18 +111,18 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-contract_type | call_option
-direction | short
-expected_yield | 0.08
-notional | 10000.0
-option_delta | 0.72
-option_type | call_option
-premium_rate | 5.0
-stress_loss | 200.0
-term_days | 180
-underlying_code | 000300.SH
-underlying_name | 沪深300指数
-underlying_type | index_component
+contract_type（合约类型） | call_option（看涨期权）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.08
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.72
+option_type（期权类型） | call_option（看涨期权）
+premium_rate（权利金率） | 5.0
+stress_loss（压力损失） | 200.0
+term_days（期限/天） | 180
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -130,13 +130,13 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-cash_spent | 9000.0
-direction | long
-notional | 9000.0
-tool_type | etf
-underlying_code | 510300.SH
-underlying_name | 沪深300ETF
-underlying_type | index_component
+cash_spent（现金支出） | 9000.0
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 9000.0
+tool_type（工具类型） | etf（ETF）
+underlying_code（标的代码） | 510300.SH
+underlying_name（标的名称） | 沪深300ETF
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模型输出
 
@@ -154,10 +154,10 @@ underlying_type | index_component
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 148.4021% | -0.5386% | safe | ≥100% |
-| NSFR | 141.0645% | 140.9981% | -0.0664% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.5000% | +0.0014% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2211.5436% | -17.6456% | safe | ≥100% |
+| LCR | 148.9407% | 148.4021% | -0.5386% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.9981% | -0.0664% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.5000% | +0.0014% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2211.5436% | -17.6456% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
@@ -193,17 +193,17 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-contract_type | put_option
-direction | buy
-expected_yield | 0.05
-notional | 10000.0
-option_delta | -0.5
-option_type | put_option
-premium_rate | 3.0
-term_days | 90
-underlying_code | 000300.SH
-underlying_name | 沪深300指数
-underlying_type | index_component
+contract_type（合约类型） | put_option（看跌期权）
+direction（方向） | buy（买入 / 做多）
+expected_yield（预期年化收益率） | 0.05
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.5
+option_type（期权类型） | put_option（看跌期权）
+premium_rate（权利金率） | 3.0
+term_days（期限/天） | 90
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -225,10 +225,10 @@ underlying_type | index_component
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9031% | -0.0376% | safe | ≥100% |
-| NSFR | 141.0645% | 141.0645% | +0.0000% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4987% | +0.0001% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2220.1884% | -9.0008% | safe | ≥100% |
+| LCR | 148.9407% | 148.9031% | -0.0376% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 141.0645% | +0.0000% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4987% | +0.0001% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2220.1884% | -9.0008% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
@@ -236,7 +236,7 @@ underlying_type | index_component
 |---|---|---|
 | ROC 资本收益率 | 1.6667 元/元 | 预期创收 / 新增风险资本准备 |
 | RO-LCR 流动性创收率 | 1.6667 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 999.0000 元/元 | 预期创收 / ΔRSF |
+| RO-NSFR 稳定资金创收率 | 不适用 | 预期创收 / ΔRSF |
 | 预期年化创收 | 500.00 万元 | 名义本金 × 预期年化收益率 |
 
 #### 对冲有效性判定
@@ -260,15 +260,15 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-contract_type | equity_swap
-direction | short
-expected_yield | 0.06
-margin_rate | 10.0
-notional | 20000.0
-term_days | 365
-underlying_code | 600519.SH
-underlying_name | 贵州茅台
-underlying_type | general_stock
+contract_type（合约类型） | equity_swap（收益互换）
+direction（方向） | short（空头 / 卖出）
+expected_yield（预期年化收益率） | 0.06
+margin_rate（保证金率） | 10.0
+notional（名义本金） | 20000.0
+term_days（期限/天） | 365
+underlying_code（标的代码） | 600519.SH
+underlying_name（标的名称） | 贵州茅台
+underlying_type（标的类型） | general_stock（一般个股）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -276,12 +276,12 @@ underlying_type | general_stock
 
 字段 | 值
 --- | ---
-direction | long
-futures_margin | 2160.0
-notional | 18000.0
-tool_type | futures
-underlying_code | 000300.SH
-underlying_name | 沪深300股指期货
+direction（方向） | long（多头 / 买入）
+futures_margin（期货保证金） | 2160.0
+notional（名义本金） | 18000.0
+tool_type（工具类型） | futures（期货）
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300股指期货
 
 ### 模型输出
 
@@ -299,10 +299,10 @@ underlying_name | 沪深300股指期货
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9132% | -0.0275% | safe | ≥100% |
-| NSFR | 141.0645% | 140.9109% | -0.1536% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4975% | -0.0012% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2161.9948% | -67.1944% | safe | ≥100% |
+| LCR | 148.9407% | 148.9132% | -0.0275% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.9109% | -0.1536% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4975% | -0.0012% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2161.9948% | -67.1944% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
@@ -316,11 +316,11 @@ underlying_name | 沪深300股指期货
 #### 对冲有效性判定
 
 - 是否达成有效对冲：否
-- 原因：标的 600519.SH 与 000300.SH 相关性 -55.14%，未达 95%
+- 原因：标的 600519.SH 与 000300.SH 相关性 -55.21%，未达 95%
 
 ### 关键判断与说明
 
-- 未达成有效对冲：标的 600519.SH 与 000300.SH 相关性 -55.14%，未达 95%
+- 未达成有效对冲：标的 600519.SH 与 000300.SH 相关性 -55.21%，未达 95%
 - 触发收益互换惩罚条件：非全额保证金 + 境内个股，市场风险资本准备 **加倍**。
 - 同时计提信用风险资本准备 = 名义本金 × 5%。
 - 净资本变动 -2,160.00 万元，来源于期货/卖出期权保证金占用扣减。
@@ -335,15 +335,15 @@ underlying_name | 沪深300股指期货
 
 字段 | 值
 --- | ---
-contract_type | equity_swap
-direction | short
-expected_yield | 0.06
-margin_rate | 100.0
-notional | 20000.0
-term_days | 365
-underlying_code | 000300.SH
-underlying_name | 沪深300指数
-underlying_type | index_component
+contract_type（合约类型） | equity_swap（收益互换）
+direction（方向） | short（空头 / 卖出）
+expected_yield（预期年化收益率） | 0.06
+margin_rate（保证金率） | 100.0
+notional（名义本金） | 20000.0
+term_days（期限/天） | 365
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -351,13 +351,13 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-cash_spent | 18000.0
-direction | long
-notional | 18000.0
-tool_type | etf
-underlying_code | 510300.SH
-underlying_name | 沪深300ETF
-underlying_type | index_component
+cash_spent（现金支出） | 18000.0
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 18000.0
+tool_type（工具类型） | etf（ETF）
+underlying_code（标的代码） | 510300.SH
+underlying_name（标的名称） | 沪深300ETF
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模型输出
 
@@ -375,17 +375,17 @@ underlying_type | index_component
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 150.3121% | +1.3714% | safe | ≥100% |
-| NSFR | 141.0645% | 140.9343% | -0.1302% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4979% | -0.0007% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2199.4667% | -29.7225% | safe | ≥100% |
+| LCR | 148.9407% | 150.3121% | +1.3714% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.9343% | -0.1302% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4979% | -0.0007% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2199.4667% | -29.7225% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
 | 指标 | 数值 | 说明 |
 |---|---|---|
 | ROC 资本收益率 | 1.2000 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 999.0000 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
 | RO-NSFR 稳定资金创收率 | 0.6000 元/元 | 预期创收 / ΔRSF |
 | 预期年化创收 | 1,200.00 万元 | 名义本金 × 预期年化收益率 |
 
@@ -409,16 +409,16 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-contract_type | income_certificate
-direction | short
-expected_yield | 0.04
-funds_raised | 50000.0
-notional | 50000.0
-stress_loss | （未填写）
-term_days | 60
-underlying_code | 000001.SZ
-underlying_name | 平安银行
-underlying_type | general_stock
+contract_type（合约类型） | income_certificate（收益凭证）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.04
+funds_raised（募集资金） | 50000.0
+notional（名义本金） | 50000.0
+stress_loss（压力损失） | （未填写）
+term_days（期限/天） | 60
+underlying_code（标的代码） | 000001.SZ
+underlying_name（标的名称） | 平安银行
+underlying_type（标的类型） | general_stock（一般个股）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -426,25 +426,25 @@ underlying_type | general_stock
 
 字段 | 值
 --- | ---
-direction | long
-notional | 30000.0
-stock_type | general_stock
-tool_type | stock
-underlying_code | 000001.SZ
-underlying_name | 一般上市公司股票
-underlying_type | general_stock
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 30000.0
+stock_type（股票类型） | general_stock（一般个股）
+tool_type（工具类型） | stock（股票）
+underlying_code（标的代码） | 000001.SZ
+underlying_name（标的名称） | 一般上市公司股票
+underlying_type（标的类型） | general_stock（一般个股）
 
 #### 对冲工具 #2
 
 字段 | 值
 --- | ---
-cash_spent | 20000.0
-direction | long
-notional | 20000.0
-tool_type | etf
-underlying_code | 510300.SH
-underlying_name | 沪深300ETF
-underlying_type | index_component
+cash_spent（现金支出） | 20000.0
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 20000.0
+tool_type（工具类型） | etf（ETF）
+underlying_code（标的代码） | 510300.SH
+underlying_name（标的名称） | 沪深300ETF
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模型输出
 
@@ -462,17 +462,17 @@ underlying_type | index_component
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 150.1943% | +1.2536% | safe | ≥100% |
-| NSFR | 141.0645% | 139.9652% | -1.0993% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4987% | +0.0000% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2229.1892% | +0.0000% | safe | ≥100% |
+| LCR | 148.9407% | 150.1943% | +1.2536% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 139.9652% | -1.0993% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4987% | +0.0000% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2229.1892% | +0.0000% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
 | 指标 | 数值 | 说明 |
 |---|---|---|
-| ROC 资本收益率 | 999.0000 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 999.0000 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| ROC 资本收益率 | 不适用 | 预期创收 / 新增风险资本准备 |
+| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
 | RO-NSFR 稳定资金创收率 | 0.1176 元/元 | 预期创收 / ΔRSF |
 | 预期年化创收 | 2,000.00 万元 | 名义本金 × 预期年化收益率 |
 
@@ -498,16 +498,16 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-contract_type | income_certificate
-direction | short
-expected_yield | 0.05
-funds_raised | 50000.0
-notional | 50000.0
-stress_loss | 300.0
-term_days | 90
-underlying_code | 000300.SH
-underlying_name | 沪深300指数
-underlying_type | index_component
+contract_type（合约类型） | income_certificate（收益凭证）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.05
+funds_raised（募集资金） | 50000.0
+notional（名义本金） | 50000.0
+stress_loss（压力损失） | 300.0
+term_days（期限/天） | 90
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -515,12 +515,12 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-direction | short
-futures_margin | 4800.0
-notional | 40000.0
-tool_type | futures
-underlying_code | 000300.SH
-underlying_name | 沪深300股指期货
+direction（方向） | short（空头 / 卖出）
+futures_margin（期货保证金） | 4800.0
+notional（名义本金） | 40000.0
+tool_type（工具类型） | futures（期货）
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300股指期货
 
 ### 模型输出
 
@@ -538,17 +538,17 @@ underlying_name | 沪深300股指期货
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 154.5489% | +5.6082% | safe | ≥100% |
-| NSFR | 141.0645% | 140.7407% | -0.3238% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4890% | -0.0096% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2209.2680% | -19.9212% | safe | ≥100% |
+| LCR | 148.9407% | 154.5489% | +5.6082% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.7407% | -0.3238% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4890% | -0.0096% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2209.2680% | -19.9212% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
 | 指标 | 数值 | 说明 |
 |---|---|---|
 | ROC 资本收益率 | 5.5556 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 999.0000 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
 | RO-NSFR 稳定资金创收率 | 0.5020 元/元 | 预期创收 / ΔRSF |
 | 预期年化创收 | 2,500.00 万元 | 名义本金 × 预期年化收益率 |
 
@@ -579,18 +579,18 @@ underlying_name | 沪深300股指期货
 
 字段 | 值
 --- | ---
-contract_type | call_option
-direction | short
-expected_yield | 0.08
-notional | 10000.0
-option_delta | 0.72
-option_type | call_option
-premium_rate | 5.0
-stress_loss | 200.0
-term_days | 180
-underlying_code | 510050.SH
-underlying_name | 上证50ETF
-underlying_type | index_component
+contract_type（合约类型） | call_option（看涨期权）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.08
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.72
+option_type（期权类型） | call_option（看涨期权）
+premium_rate（权利金率） | 5.0
+stress_loss（压力损失） | 200.0
+term_days（期限/天） | 180
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 上证50ETF
+underlying_type（标的类型） | index_component（指数成分）
 
 ### 模块 B：交易端（对冲工具）输入
 
@@ -598,15 +598,15 @@ underlying_type | index_component
 
 字段 | 值
 --- | ---
-direction | long
-notional | 9000.0
-option_delta | 0.8
-option_premium | 180.0
-option_type | call_option
-tool_code | 10011855
-tool_type | onsite_option
-underlying_code | 510050.SH
-underlying_name | 50ETF 场内看涨期权
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 9000.0
+option_delta（期权Delta） | 0.8
+option_premium（期权权利金） | 180.0
+option_type（期权类型） | call_option（看涨期权）
+tool_code（工具代码） | 10011855
+tool_type（工具类型） | onsite_option（场内期权）
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 50ETF 场内看涨期权
 
 ### 模型输出
 
@@ -624,28 +624,28 @@ underlying_name | 50ETF 场内看涨期权
 
 | 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
 |---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9435% | +0.0028% | safe | ≥100% |
-| NSFR | 141.0645% | 141.0567% | -0.0078% | safe | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4984% | -0.0002% | danger | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2217.4966% | -11.6926% | safe | ≥100% |
+| LCR | 148.9407% | 148.9435% | +0.0028% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 141.0567% | -0.0078% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4984% | -0.0002% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2217.4966% | -11.6926% | safe（安全） | ≥100% |
 
 #### 第三层：动态性价比指标
 
 | 指标 | 数值 | 说明 |
 |---|---|---|
 | ROC 资本收益率 | 2.6667 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 999.0000 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
 | RO-NSFR 稳定资金创收率 | 6.6667 元/元 | 预期创收 / ΔRSF |
 | 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
 
 #### 对冲有效性判定
 
 - 是否达成有效对冲：否
-- 原因：多头/空头 Delta 比例 68.7%，不在 80%-125% 之间
+- 原因：多头/空头 Delta 比例 69.4%，不在 80%-125% 之间
 
 ### 关键判断与说明
 
-- 未达成有效对冲：多头/空头 Delta 比例 68.7%，不在 80%-125% 之间
+- 未达成有效对冲：多头/空头 Delta 比例 69.4%，不在 80%-125% 之间
 - 场外期权按单边敞口计提市场风险资本准备：卖出 **30%**，买入 **100%**。
 - 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
 - LCR 表外流出增量 = S_short × 20% = 200.00 万元。
@@ -656,16 +656,265 @@ underlying_name | 50ETF 场内看涨期权
 
 ---
 
+## TC09：卖出看涨期权 + 股指期货同标的对冲（直接判定有效对冲，无需 iFinD 相关性）
+
+**业务场景**：股指期货标的代码与客户合约标的代码完全一致（均为 000300.SH），系统直接判定标的一致，不触发 iFinD 相关性查询。
+
+### 模块 A：场内合约端输入
+
+字段 | 值
+--- | ---
+contract_type（合约类型） | call_option（看涨期权）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.08
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.72
+option_type（期权类型） | call_option（看涨期权）
+premium_rate（权利金率） | 5.0
+stress_loss（压力损失） | 200.0
+term_days（期限/天） | 180
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300指数
+underlying_type（标的类型） | index_component（指数成分）
+
+### 模块 B：交易端（对冲工具）输入
+
+#### 对冲工具 #1
+
+字段 | 值
+--- | ---
+direction（方向） | long（多头 / 买入）
+future_delta（期货Delta） | 1.0
+futures_margin（期货保证金） | 1080.0
+notional（名义本金） | 9000.0
+tool_type（工具类型） | futures（期货）
+underlying_code（标的代码） | 000300.SH
+underlying_name（标的名称） | 沪深300股指期货
+
+### 模型输出
+
+#### 第一层：现金流与资源消耗绝对值
+
+| 输出项 | 数值 | 说明 |
+|---|---|---|
+| 首日净现金流 | -580.00 万元 | 合约端流入 - 交易端流出 |
+| 新增风险资本准备 | 117.50 万元 | 含市场风险 + 信用风险 |
+| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
+| 新增表内外资产总额 | 1,770.00 万元 | 杠杆率分母增量 |
+| 净资本变动 | -3,080.00 万元 | 保证金扣减 |
+
+#### 第二层：核心风控指标边际变动
+
+| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
+|---|---|---|---|---|---|
+| LCR | 148.9407% | 148.8307% | -0.1100% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 140.9863% | -0.0782% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4983% | -0.0003% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2221.4996% | -7.6895% | safe（安全） | ≥100% |
+
+#### 第三层：动态性价比指标
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| ROC 资本收益率 | 6.8085 元/元 | 预期创收 / 新增风险资本准备 |
+| RO-LCR 流动性创收率 | 1.0256 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-NSFR 稳定资金创收率 | 0.6667 元/元 | 预期创收 / ΔRSF |
+| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
+
+#### 对冲有效性判定
+
+- 是否达成有效对冲：是
+
+### 关键判断与说明
+
+- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
+- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
+- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
+- 净资本变动 -3,080.00 万元，来源于期货/卖出期权保证金占用扣减。
+
+---
+
+## TC10：买入看跌期权 + 场内看跌期权对冲（iFinD Greeks 实时 Delta）
+
+**业务场景**：买入 50ETF 看跌期权后，交易台买入 50ETF 场内看跌期权对冲。系统优先通过 iFinD 获取场内期权实时 Delta 系数。
+
+**本用例触发的 iFinD 数据查询**：
+
+- `get_onsite_option_greeks(10011855, 'delta')`
+
+### 模块 A：场内合约端输入
+
+字段 | 值
+--- | ---
+contract_type（合约类型） | put_option（看跌期权）
+direction（方向） | buy（买入 / 做多）
+expected_yield（预期年化收益率） | 0.05
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.5
+option_type（期权类型） | put_option（看跌期权）
+premium_rate（权利金率） | 3.0
+term_days（期限/天） | 90
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 上证50ETF
+underlying_type（标的类型） | index_component（指数成分）
+
+### 模块 B：交易端（对冲工具）输入
+
+#### 对冲工具 #1
+
+字段 | 值
+--- | ---
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 8000.0
+option_delta（期权Delta） | -0.45
+option_premium（期权权利金） | 160.0
+option_type（期权类型） | put_option（看跌期权）
+tool_code（工具代码） | 10011855
+tool_type（工具类型） | onsite_option（场内期权）
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 50ETF 场内看跌期权
+
+### 模型输出
+
+#### 第一层：现金流与资源消耗绝对值
+
+| 输出项 | 数值 | 说明 |
+|---|---|---|
+| 首日净现金流 | -460.00 万元 | 合约端流入 - 交易端流出 |
+| 新增风险资本准备 | 23.00 万元 | 含市场风险 + 信用风险 |
+| 新增未来 30 日现金净流出 | 0.00 万元 | LCR 分母增量 |
+| 新增表内外资产总额 | -460.00 万元 | 杠杆率分母增量 |
+| 净资本变动 | 0.00 万元 | 保证金扣减 |
+
+#### 第二层：核心风控指标边际变动
+
+| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
+|---|---|---|---|---|---|
+| LCR | 148.9407% | 148.8830% | -0.0577% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 141.0645% | +0.0000% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4988% | +0.0001% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2228.4965% | -0.6926% | safe（安全） | ≥100% |
+
+#### 第三层：动态性价比指标
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| ROC 资本收益率 | 21.7391 元/元 | 预期创收 / 新增风险资本准备 |
+| RO-LCR 流动性创收率 | 1.0870 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-NSFR 稳定资金创收率 | 不适用 | 预期创收 / ΔRSF |
+| 预期年化创收 | 500.00 万元 | 名义本金 × 预期年化收益率 |
+
+#### 对冲有效性判定
+
+- 是否达成有效对冲：是
+
+### 关键判断与说明
+
+- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
+- 净资本变动为 0，本组合无额外保证金扣减。
+- 本用例依赖 iFinD 数据：
+  - `get_onsite_option_greeks(10011855, 'delta')`
+- 场内期权 Greeks：系统优先尝试 iFinD 实时 Delta；若查询失败或返回异常，自动回退到手动输入的 option_delta。
+
+---
+
+## TC11：卖出看涨期权 + 场内期权对冲（iFinD Greeks 获取失败，回退到手动 Delta）
+
+**业务场景**：填写了无效场内期权合约编码，iFinD 无法返回有效 Greeks，系统回退到交易台手动输入的 option_delta 进行有效对冲判定。
+
+**本用例触发的 iFinD 数据查询**：
+
+- `get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback`
+
+### 模块 A：场内合约端输入
+
+字段 | 值
+--- | ---
+contract_type（合约类型） | call_option（看涨期权）
+direction（方向） | short（卖出 / 做空）
+expected_yield（预期年化收益率） | 0.08
+notional（名义本金） | 10000.0
+option_delta（期权Delta） | -0.72
+option_type（期权类型） | call_option（看涨期权）
+premium_rate（权利金率） | 5.0
+stress_loss（压力损失） | 200.0
+term_days（期限/天） | 180
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 上证50ETF
+underlying_type（标的类型） | index_component（指数成分）
+
+### 模块 B：交易端（对冲工具）输入
+
+#### 对冲工具 #1
+
+字段 | 值
+--- | ---
+direction（方向） | long（多头 / 买入）
+notional（名义本金） | 9000.0
+option_delta（期权Delta） | 0.8
+option_premium（期权权利金） | 180.0
+option_type（期权类型） | call_option（看涨期权）
+tool_code（工具代码） | INVALID_OPTION
+tool_type（工具类型） | onsite_option（场内期权）
+underlying_code（标的代码） | 510050.SH
+underlying_name（标的名称） | 50ETF 场内看涨期权（无效代码）
+
+### 模型输出
+
+#### 第一层：现金流与资源消耗绝对值
+
+| 输出项 | 数值 | 说明 |
+|---|---|---|
+| 首日净现金流 | 320.00 万元 | 合约端流入 - 交易端流出 |
+| 新增风险资本准备 | 59.00 万元 | 含市场风险 + 信用风险 |
+| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
+| 新增表内外资产总额 | 1,320.00 万元 | 杠杆率分母增量 |
+| 净资本变动 | -2,000.00 万元 | 保证金扣减 |
+
+#### 第二层：核心风控指标边际变动
+
+| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
+|---|---|---|---|---|---|
+| LCR | 148.9407% | 148.9435% | +0.0028% | safe（安全） | ≥100% |
+| NSFR | 141.0645% | 141.0567% | -0.0078% | safe（安全） | ≥100% |
+| 资本杠杆率 | 5.4987% | 5.4984% | -0.0002% | danger（危险） | ≥8% |
+| 风险覆盖率 | 2229.1892% | 2224.7127% | -4.4765% | safe（安全） | ≥100% |
+
+#### 第三层：动态性价比指标
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| ROC 资本收益率 | 13.5593 元/元 | 预期创收 / 新增风险资本准备 |
+| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
+| RO-NSFR 稳定资金创收率 | 6.6667 元/元 | 预期创收 / ΔRSF |
+| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
+
+#### 对冲有效性判定
+
+- 是否达成有效对冲：是
+
+### 关键判断与说明
+
+- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
+- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
+- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
+- 净资本变动 -2,000.00 万元，来源于期货/卖出期权保证金占用扣减。
+- 本用例依赖 iFinD 数据：
+  - `get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback`
+- 场内期权 Greeks：系统优先尝试 iFinD 实时 Delta；若查询失败或返回异常，自动回退到手动输入的 option_delta。
+
+---
+
 ## 附录：公司基准参数（config.py）
 
 | 参数 | 数值（万元） |
 |---|---|
-| HQLA_base | 1,188,100.00 |
-| LCR_COF_base | 797,700.00 |
-| ASF_base | 3,053,200.00 |
-| RSF_base | 2,164,400.00 |
-| net_capital_base | 1,649,600.00 |
-| total_risk_reserve_base | 74,000.00 |
-| on_off_balance_total_asset_base | 30,000,000.00 |
+| HQLA_base（优质流动性资产基数） | 1,188,100.00 |
+| LCR_COF_base（LCR现金流出基数） | 797,700.00 |
+| ASF_base（可用稳定资金基数） | 3,053,200.00 |
+| RSF_base（所需稳定资金基数） | 2,164,400.00 |
+| net_capital_base（净资本基数） | 1,649,600.00 |
+| total_risk_reserve_base（风险资本准备总额基数） | 74,000.00 |
+| on_off_balance_total_asset_base（表内外资产总额基数） | 30,000,000.00 |
 | classification_factor（分类评价系数 k_class） | 1.0 |
-| asf_rating_factor | 0.0 |
+| asf_rating_factor（ASF评级系数） | 0.0 |

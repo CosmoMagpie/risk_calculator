@@ -11,6 +11,7 @@ from ..services.ifind_client import (
     get_underlying_price_series,
     calculate_correlation_between_price_series,
     get_onsite_option_greeks,
+    normalize_a_share_code,
 )
 
 
@@ -41,11 +42,12 @@ def _collect_deltas(
             # 场内期权优先从 iFinD API 获取实时 Delta 系数
             delta_coef = get_onsite_option_greeks(hedge.get_tool_code(), "delta")
             if delta_coef is not None:
-                # iFinD 返回的是 Delta 系数，需乘以名义本金转为 Delta 金额
+                # iFinD 返回的是合约本身的 Delta 系数（看涨为正、看跌为负），
+                # 需结合头寸方向（买入=+1，卖出=-1）与名义本金转为头寸 Delta 金额。
                 notional = hedge.get_tool_notional() or 0.0
                 direction_str = hedge.get_tool_direction()
                 direction = 1 if direction_str == "long" else -1
-                hedge_delta = direction * abs(delta_coef) * notional
+                hedge_delta = direction * delta_coef * notional
             else:
                 hedge_delta = hedge.get_hedge_delta_amount()
         else:
@@ -82,12 +84,13 @@ def is_effective_hedge(
         [bool, str]: [是否达成有效对冲, 失败原因（成功时为 None）]
     """
     # ====== 条件1：标的一致 或 相关性 ≥ 95% ======
-    otc_code = otc.get_otc_underlying_code()
+    # 统一 A 股代码后缀，便于 iFinD 识别并避免 "000300" 与 "000300.SH" 被误判为不同标的
+    otc_code = normalize_a_share_code(otc.get_otc_underlying_code())
     if otc_code is None or str(otc_code).strip() == "":
         return [False, "未填写场外合约标的代码，不满足有效对冲条件"]
 
     hedge_codes = [
-        h.get_tool_underlying_code()
+        normalize_a_share_code(h.get_tool_underlying_code())
         for h in hedge_list
         if h.get_tool_underlying_code() is not None and str(h.get_tool_underlying_code()).strip() != ""
     ]

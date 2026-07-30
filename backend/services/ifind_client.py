@@ -107,6 +107,44 @@ def get_ifind_login_status() -> dict:
     return dict(_LOGIN_STATUS)
 
 
+# =============== A股代码后缀归一化（便于 iFinD 识别）==============
+
+_A_SHARE_SUFFIXES = (".SH", ".SZ", ".BJ")
+
+
+def normalize_a_share_code(code: str) -> str:
+    """
+    将 A 股代码统一补充为 iFinD 可识别的后缀格式。
+
+    规则（仅针对 A 股 6 位数字代码，不区分境内/境外市场）：
+      - 已带 .SH/.SZ/.BJ 后缀：直接返回
+      - 6 位数字：
+          0/3/68/69 开头 → 补充 .SZ
+          6/9 开头      → 补充 .SH
+          其他          → 保持原样
+      - 非 6 位数字或已带其他后缀：保持原样
+
+    Args:
+        code: 标的代码，如 '000300', '000300.SH', 'AAPL.O'
+
+    Returns:
+        归一化后的代码
+    """
+    if not code or not isinstance(code, str):
+        return code
+    code = code.strip().upper()
+    if not code:
+        return code
+    if code.endswith(_A_SHARE_SUFFIXES):
+        return code
+    if len(code) == 6 and code.isdigit():
+        if code.startswith(("0", "3", "68", "69")):
+            return code + ".SZ"
+        if code.startswith(("6", "9")):
+            return code + ".SH"
+    return code
+
+
 # =============== 基础数据接口 ===============
 
 def get_underlying_price_series(
@@ -127,6 +165,7 @@ def get_underlying_price_series(
     Returns:
         Dict[str, List[float]]: {"代码": [价格列表]}，若获取失败返回空列表
     """
+    underlying_code = normalize_a_share_code(underlying_code)
     if not ifind_login():
         return {underlying_code: []}
 

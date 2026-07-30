@@ -110,7 +110,8 @@ with st.sidebar:
     with login_col:
         if st.button("登录 iFinD", key="ifind_login_btn"):
             if ifind_user and ifind_pwd:
-                ok = ifind_login(user_name=ifind_user, password=ifind_pwd)
+                set_ifind_credentials(ifind_user, ifind_pwd)
+                ok = ifind_login(force=True)
                 if ok:
                     st.success("iFinD 登录成功")
                 else:

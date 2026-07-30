@@ -7,6 +7,7 @@
 import sys
 import os
 import math
+import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
@@ -39,8 +40,8 @@ def _try_ifind_login() -> bool:
 IFIND_AVAILABLE = _try_ifind_login()
 
 
-def _mock_price_series(underlying_code: str, **kwargs):
-    """模拟历史收盘价序列（252 个交易日）。"""
+def _mock_price_series(underlying_code: str, price_type: str = "close", **kwargs):
+    """模拟历史收盘价序列（252 个交易日），返回 List[float]。"""
     base = {"000300.SH": 4000, "510300.SH": 4.0, "510050.SH": 2.5,
             "000852.SH": 6000, "600519.SH": 1700, "000001.SH": 3000}.get(underlying_code, 1000)
     prices = [base * (1 + 0.001 * math.sin(i / 10) + 0.0002 * i) for i in range(252)]
@@ -53,8 +54,13 @@ def _mock_corr(otc_code, otc_prices, hedge_code, hedge_prices):
 
 
 def _mock_greeks(option_code: str, greek_letter: str = 'delta'):
-    """模拟场内期权 Greeks；若代码包含示例标记则返回固定值。"""
-    if greek_letter.lower() == 'delta':
+    """模拟场内期权 Greeks；仅对看起来像合约编码的代码返回固定值，否则模拟 iFinD 返回 None。"""
+    if not option_code or not isinstance(option_code, str):
+        return None
+    code = option_code.strip()
+    # 模拟真实 iFinD：8 位数字合约编码视为有效，其他视为无效
+    is_valid = code.isdigit() and len(code) == 8
+    if is_valid and greek_letter.lower() == 'delta':
         return 0.65
     return None
 
@@ -94,7 +100,7 @@ TEST_CASES: List[Dict[str, Any]] = [
             "underlying_code": "000300.SH",
             "option_type": "call_option",
             "premium_rate": 5.0,
-            "option_delta": 0.72,
+            "option_delta": -0.72,
             "stress_loss": 200.0,
             "expected_yield": 0.08,
             "term_days": 180,
@@ -125,7 +131,7 @@ TEST_CASES: List[Dict[str, Any]] = [
             "underlying_code": "000300.SH",
             "option_type": "call_option",
             "premium_rate": 5.0,
-            "option_delta": 0.72,
+            "option_delta": -0.72,
             "stress_loss": 200.0,
             "expected_yield": 0.08,
             "term_days": 180,
@@ -292,7 +298,7 @@ TEST_CASES: List[Dict[str, Any]] = [
             "underlying_code": "510050.SH",
             "option_type": "call_option",
             "premium_rate": 5.0,
-            "option_delta": 0.72,
+            "option_delta": -0.72,
             "stress_loss": 200.0,
             "expected_yield": 0.08,
             "term_days": 180,
@@ -312,6 +318,101 @@ TEST_CASES: List[Dict[str, Any]] = [
         ],
         "ifind_trigger": ["get_onsite_option_greeks(10011855, 'delta')"],
     },
+    {
+        "id": "TC09",
+        "name": "卖出看涨期权 + 股指期货同标的对冲（直接判定有效对冲，无需 iFinD 相关性）",
+        "scenario": "股指期货标的代码与客户合约标的代码完全一致（均为 000300.SH），系统直接判定标的一致，不触发 iFinD 相关性查询。",
+        "client": {
+            "contract_type": "call_option",
+            "direction": "short",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_name": "沪深300指数",
+            "underlying_code": "000300.SH",
+            "option_type": "call_option",
+            "premium_rate": 5.0,
+            "option_delta": -0.72,
+            "stress_loss": 200.0,
+            "expected_yield": 0.08,
+            "term_days": 180,
+        },
+        "hedges": [
+            {
+                "tool_type": "futures",
+                "direction": "long",
+                "notional": 9000.0,
+                "future_delta": 1.0,
+                "underlying_name": "沪深300股指期货",
+                "underlying_code": "000300.SH",
+                "futures_margin": 1080.0,
+            },
+        ],
+    },
+    {
+        "id": "TC10",
+        "name": "买入看跌期权 + 场内看跌期权对冲（iFinD Greeks 实时 Delta）",
+        "scenario": "买入 50ETF 看跌期权后，交易台买入 50ETF 场内看跌期权对冲。系统优先通过 iFinD 获取场内期权实时 Delta 系数。",
+        "client": {
+            "contract_type": "put_option",
+            "direction": "buy",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_name": "上证50ETF",
+            "underlying_code": "510050.SH",
+            "option_type": "put_option",
+            "premium_rate": 3.0,
+            "option_delta": -0.50,
+            "expected_yield": 0.05,
+            "term_days": 90,
+        },
+        "hedges": [
+            {
+                "tool_type": "onsite_option",
+                "direction": "long",
+                "notional": 8000.0,
+                "option_type": "put_option",
+                "option_delta": -0.45,
+                "option_premium": 160.0,
+                "tool_code": "10011855",
+                "underlying_name": "50ETF 场内看跌期权",
+                "underlying_code": "510050.SH",
+            },
+        ],
+        "ifind_trigger": ["get_onsite_option_greeks(10011855, 'delta')"],
+    },
+    {
+        "id": "TC11",
+        "name": "卖出看涨期权 + 场内期权对冲（iFinD Greeks 获取失败，回退到手动 Delta）",
+        "scenario": "填写了无效场内期权合约编码，iFinD 无法返回有效 Greeks，系统回退到交易台手动输入的 option_delta 进行有效对冲判定。",
+        "client": {
+            "contract_type": "call_option",
+            "direction": "short",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_name": "上证50ETF",
+            "underlying_code": "510050.SH",
+            "option_type": "call_option",
+            "premium_rate": 5.0,
+            "option_delta": -0.72,
+            "stress_loss": 200.0,
+            "expected_yield": 0.08,
+            "term_days": 180,
+        },
+        "hedges": [
+            {
+                "tool_type": "onsite_option",
+                "direction": "long",
+                "notional": 9000.0,
+                "option_type": "call_option",
+                "option_delta": 0.80,
+                "option_premium": 180.0,
+                "tool_code": "INVALID_OPTION",
+                "underlying_name": "50ETF 场内看涨期权（无效代码）",
+                "underlying_code": "510050.SH",
+            },
+        ],
+        "ifind_trigger": ["get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback"],
+    },
 ]
 
 
@@ -319,13 +420,108 @@ TEST_CASES: List[Dict[str, Any]] = [
 # Markdown 生成
 # ============================================================
 
-def _dict_to_md_table(d: Dict[str, Any], header: str = "字段 | 值", align: str = "--- | ---") -> str:
+# 字段名 → 中文
+FIELD_CN: Dict[str, str] = {
+    "contract_type": "合约类型",
+    "direction": "方向",
+    "expected_yield": "预期年化收益率",
+    "notional": "名义本金",
+    "option_delta": "期权Delta",
+    "option_type": "期权类型",
+    "premium_rate": "权利金率",
+    "stress_loss": "压力损失",
+    "term_days": "期限/天",
+    "underlying_code": "标的代码",
+    "underlying_name": "标的名称",
+    "underlying_type": "标的类型",
+    "margin_rate": "保证金率",
+    "cash_spent": "现金支出",
+    "tool_type": "工具类型",
+    "futures_margin": "期货保证金",
+    "stock_type": "股票类型",
+    "option_premium": "期权权利金",
+    "tool_code": "工具代码",
+    "funds_raised": "募集资金",
+    "future_delta": "期货Delta",
+}
+
+# 值 → 中文（不含 direction，因为根据上下文不同）
+VALUE_CN: Dict[str, str] = {
+    "call_option": "看涨期权",
+    "put_option": "看跌期权",
+    "equity_swap": "收益互换",
+    "income_certificate": "收益凭证",
+    "index_component": "指数成分",
+    "general_stock": "一般个股",
+    "etf": "ETF",
+    "futures": "期货",
+    "stock": "股票",
+    "onsite_option": "场内期权",
+    "safe": "安全",
+    "danger": "危险",
+}
+
+# direction 值 → 中文，按产品类型区分
+# 期权/收益凭证的 short/buy；对冲工具的 long/short；互换的 short
+DIRECTION_CN_CLIENT: Dict[str, str] = {
+    "short": "卖出 / 做空",
+    "buy": "买入 / 做多",
+}
+DIRECTION_CN_EQUITY_SWAP: Dict[str, str] = {
+    "short": "空头 / 卖出",
+}
+DIRECTION_CN_HEDGE: Dict[str, str] = {
+    "long": "多头 / 买入",
+    "short": "空头 / 卖出",
+}
+
+
+def _translate_direction(value: str, contract_type: str = "", is_hedge: bool = False) -> str:
+    """按产品类型和对冲/合约角色翻译 direction 值。"""
+    if is_hedge:
+        return DIRECTION_CN_HEDGE.get(value, value)
+    if contract_type == "equity_swap":
+        return DIRECTION_CN_EQUITY_SWAP.get(value, value)
+    return DIRECTION_CN_CLIENT.get(value, value)
+
+
+def _dict_to_md_table(
+    d: Dict[str, Any],
+    contract_type: str = "",
+    is_hedge: bool = False,
+    header: str = "字段 | 值",
+    align: str = "--- | ---",
+) -> str:
+    """将字典格式化为两列 markdown 表格，字段名和值均附加中文翻译。"""
     lines = [header, align]
     items = sorted(d.items()) if isinstance(d, dict) else list(d.items())
     for k, v in items:
-        display = v if v is not None else "（未填写）"
-        lines.append(f"{k} | {display}")
+        # 字段名翻译
+        k_cn = FIELD_CN.get(k, "")
+        k_display = f"{k}（{k_cn}）" if k_cn else k
+        # 值翻译
+        display_raw = v if v is not None else "（未填写）"
+        # 空字符串不翻译
+        if isinstance(display_raw, str) and display_raw.strip() == "":
+            display = display_raw
+        elif isinstance(display_raw, str) and display_raw != "（未填写）":
+            # 优先用上下文相关的 direction 翻译
+            if k == "direction":
+                cn = _translate_direction(str(v), contract_type, is_hedge)
+                display = f"{v}（{cn}）" if cn else str(v)
+            else:
+                cn = VALUE_CN.get(str(v), "")
+                display = f"{v}（{cn}）" if cn else str(v)
+        else:
+            # 数值或 None
+            display = str(v) if v is not None else "（未填写）"
+        lines.append(f"{k_display} | {display}")
     return "\n".join(lines)
+
+
+def _fmt_status(s: str) -> str:
+    """状态值附加中文翻译。"""
+    return f"{s}（{VALUE_CN.get(s, s)}）"
 
 
 def _fmt_money(x: float) -> str:
@@ -333,7 +529,16 @@ def _fmt_money(x: float) -> str:
 
 
 def _fmt_pct(x: float) -> str:
+    # 后端用 999 做除零保护哨兵，文档中统一显示为「不适用」
+    if abs(x - 999.0) < 1e-6:
+        return "不适用"
     return f"{x:.4%}"
+
+
+def _fmt_ratio(x: float) -> str:
+    if abs(x - 999.0) < 1e-6:
+        return "不适用"
+    return f"{x:.4f} 元/元"
 
 
 def generate_markdown() -> str:
@@ -391,7 +596,7 @@ def generate_markdown() -> str:
         lines.extend([
             "### 模块 A：场内合约端输入",
             "",
-            _dict_to_md_table(case["client"]),
+            _dict_to_md_table(case["client"], contract_type=case["client"].get("contract_type", "")),
             "",
         ])
 
@@ -405,7 +610,7 @@ def generate_markdown() -> str:
                 lines.extend([
                     f"#### 对冲工具 #{idx}",
                     "",
-                    _dict_to_md_table(hedge),
+                    _dict_to_md_table(hedge, is_hedge=True),
                     "",
                 ])
         else:
@@ -430,18 +635,18 @@ def generate_markdown() -> str:
             "",
             "| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |",
             "|---|---|---|---|---|---|",
-            f"| LCR | {_fmt_pct(result['lcr_old'])} | {_fmt_pct(result['lcr_new'])} | {result['lcr_change']:+.4%} | {result['lcr_status']} | ≥100% |",
-            f"| NSFR | {_fmt_pct(result['nsfr_old'])} | {_fmt_pct(result['nsfr_new'])} | {result['nsfr_change']:+.4%} | {result['nsfr_status']} | ≥100% |",
-            f"| 资本杠杆率 | {_fmt_pct(result['leverage_old'])} | {_fmt_pct(result['leverage_new'])} | {result['leverage_change']:+.4%} | {result['leverage_status']} | ≥8% |",
-            f"| 风险覆盖率 | {_fmt_pct(result['risk_coverage_old'])} | {_fmt_pct(result['risk_coverage_new'])} | {result['risk_coverage_change']:+.4%} | {result['risk_coverage_status']} | ≥100% |",
+            f"| LCR | {_fmt_pct(result['lcr_old'])} | {_fmt_pct(result['lcr_new'])} | {result['lcr_change']:+.4%} | {_fmt_status(result['lcr_status'])} | ≥100% |",
+            f"| NSFR | {_fmt_pct(result['nsfr_old'])} | {_fmt_pct(result['nsfr_new'])} | {result['nsfr_change']:+.4%} | {_fmt_status(result['nsfr_status'])} | ≥100% |",
+            f"| 资本杠杆率 | {_fmt_pct(result['leverage_old'])} | {_fmt_pct(result['leverage_new'])} | {result['leverage_change']:+.4%} | {_fmt_status(result['leverage_status'])} | ≥8% |",
+            f"| 风险覆盖率 | {_fmt_pct(result['risk_coverage_old'])} | {_fmt_pct(result['risk_coverage_new'])} | {result['risk_coverage_change']:+.4%} | {_fmt_status(result['risk_coverage_status'])} | ≥100% |",
             "",
             "#### 第三层：动态性价比指标",
             "",
             "| 指标 | 数值 | 说明 |",
             "|---|---|---|",
-            f"| ROC 资本收益率 | {result['roc']:.4f} 元/元 | 预期创收 / 新增风险资本准备 |",
-            f"| RO-LCR 流动性创收率 | {result['ro_lcr']:.4f} 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |",
-            f"| RO-NSFR 稳定资金创收率 | {result['ro_nsfr']:.4f} 元/元 | 预期创收 / ΔRSF |",
+            f"| ROC 资本收益率 | {_fmt_ratio(result['roc'])} | 预期创收 / 新增风险资本准备 |",
+            f"| RO-LCR 流动性创收率 | {_fmt_ratio(result['ro_lcr'])} | 预期创收 / max(0, ΔOutflow - ΔHQLA) |",
+            f"| RO-NSFR 稳定资金创收率 | {_fmt_ratio(result['ro_nsfr'])} | 预期创收 / ΔRSF |",
             f"| 预期年化创收 | {_fmt_money(result['expected_income'])} | 名义本金 × 预期年化收益率 |",
             "",
             "#### 对冲有效性判定",
@@ -467,15 +672,15 @@ def generate_markdown() -> str:
         "",
         "| 参数 | 数值（万元） |",
         "|---|---|",
-        f"| HQLA_base | {DEFAULT_CONFIG['firm']['HQLA_base'] / 10000:,.2f} |",
-        f"| LCR_COF_base | {DEFAULT_CONFIG['firm']['LCR_COF_base'] / 10000:,.2f} |",
-        f"| ASF_base | {DEFAULT_CONFIG['firm']['ASF_base'] / 10000:,.2f} |",
-        f"| RSF_base | {DEFAULT_CONFIG['firm']['RSF_base'] / 10000:,.2f} |",
-        f"| net_capital_base | {DEFAULT_CONFIG['firm']['net_capital_base'] / 10000:,.2f} |",
-        f"| total_risk_reserve_base | {DEFAULT_CONFIG['firm']['total_risk_reserve_base'] / 10000:,.2f} |",
-        f"| on_off_balance_total_asset_base | {DEFAULT_CONFIG['firm']['on_off_balance_total_asset_base'] / 10000:,.2f} |",
+        f"| HQLA_base（优质流动性资产基数） | {DEFAULT_CONFIG['firm']['HQLA_base'] / 10000:,.2f} |",
+        f"| LCR_COF_base（LCR现金流出基数） | {DEFAULT_CONFIG['firm']['LCR_COF_base'] / 10000:,.2f} |",
+        f"| ASF_base（可用稳定资金基数） | {DEFAULT_CONFIG['firm']['ASF_base'] / 10000:,.2f} |",
+        f"| RSF_base（所需稳定资金基数） | {DEFAULT_CONFIG['firm']['RSF_base'] / 10000:,.2f} |",
+        f"| net_capital_base（净资本基数） | {DEFAULT_CONFIG['firm']['net_capital_base'] / 10000:,.2f} |",
+        f"| total_risk_reserve_base（风险资本准备总额基数） | {DEFAULT_CONFIG['firm']['total_risk_reserve_base'] / 10000:,.2f} |",
+        f"| on_off_balance_total_asset_base（表内外资产总额基数） | {DEFAULT_CONFIG['firm']['on_off_balance_total_asset_base'] / 10000:,.2f} |",
         f"| classification_factor（分类评价系数 k_class） | {DEFAULT_CONFIG['firm']['classification_factor']} |",
-        f"| asf_rating_factor | {DEFAULT_CONFIG['firm']['asf_rating_factor']} |",
+        f"| asf_rating_factor（ASF评级系数） | {DEFAULT_CONFIG['firm']['asf_rating_factor']} |",
         "",
     ])
 
