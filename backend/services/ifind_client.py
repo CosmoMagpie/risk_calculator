@@ -83,6 +83,30 @@ def ifind_logout() -> None:
     _LOGIN_STATUS = {"logged_in": False, "user_name": None, "password": None}
 
 
+def set_ifind_credentials(user_name: str, password: str) -> None:
+    """设置 iFinD 登录凭据（保存到环境变量与缓存状态）"""
+    os.environ["IFIND_USER_NAME"] = user_name
+    os.environ["IFIND_PASSWORD"] = password
+    _LOGIN_STATUS["user_name"] = user_name
+    _LOGIN_STATUS["password"] = password
+    print(f"[iFinD] 凭据已更新: {user_name}")
+
+
+def clear_ifind_credentials() -> None:
+    """清除 iFinD 登录凭据"""
+    os.environ.pop("IFIND_USER_NAME", None)
+    os.environ.pop("IFIND_PASSWORD", None)
+    _LOGIN_STATUS["logged_in"] = False
+    _LOGIN_STATUS["user_name"] = None
+    _LOGIN_STATUS["password"] = None
+    print("[iFinD] 凭据已清除")
+
+
+def get_ifind_login_status() -> dict:
+    """获取当前 iFinD 登录状态"""
+    return dict(_LOGIN_STATUS)
+
+
 # =============== 基础数据接口 ===============
 
 def get_underlying_price_series(
