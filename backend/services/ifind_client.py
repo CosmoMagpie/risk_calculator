@@ -7,14 +7,25 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-
-from iFinDPy import (
-    THS_iFinDLogin,
-    THS_iFinDLogout,
-    THS_HQ,
-    THS_DS,
-    THS_RQ,
-)
+        
+# ========== iFinD 导入（带容错处理）==========
+# 若 iFinDPy 未安装，系统仍可运行，但实时行情和 Greeks 查询功能不可用
+try:
+    from iFinDPy import (
+        THS_iFinDLogin,
+        THS_iFinDLogout,
+        THS_HQ,
+        THS_DS,
+        THS_RQ,
+    )
+    _IFIND_AVAILABLE = True
+except ImportError:
+    _IFIND_AVAILABLE = False
+    THS_iFinDLogin = None
+    THS_iFinDLogout = None
+    THS_HQ = None
+    THS_DS = None
+    THS_RQ = None
 
 
 # =============== 登录状态管理 ===============
@@ -48,6 +59,10 @@ def ifind_login(force: bool = False) -> bool:
     Returns:
         bool: 登录成功返回 True，失败或凭据为空返回 False
     """
+    if not _IFIND_AVAILABLE:
+        print("[iFinD] iFinDPy 未安装，跳过登录")
+        return False
+
     if _LOGIN_STATUS["logged_in"] and not force:
         return True
 
@@ -104,7 +119,9 @@ def clear_ifind_credentials() -> None:
 
 def get_ifind_login_status() -> dict:
     """获取当前 iFinD 登录状态"""
-    return dict(_LOGIN_STATUS)
+    status = dict(_LOGIN_STATUS)
+    status["ifind_available"] = _IFIND_AVAILABLE
+    return status
 
 
 # =============== A股代码后缀归一化（便于 iFinD 识别）==============
@@ -165,6 +182,8 @@ def get_underlying_price_series(
     Returns:
         Dict[str, List[float]]: {"代码": [价格列表]}，若获取失败返回空列表
     """
+    if not _IFIND_AVAILABLE:
+        return {underlying_code: []}
     underlying_code = normalize_a_share_code(underlying_code)
     if not ifind_login():
         return {underlying_code: []}
@@ -241,6 +260,8 @@ def get_realtime_price(ifind_code: str) -> Optional[float]:
     Returns:
         float: 最新价，失败返回 None
     """
+    if not _IFIND_AVAILABLE:
+        return None
     if not ifind_login():
         return None
 
@@ -286,6 +307,8 @@ def get_latest_close_price(
     Returns:
         float: 最新有效收盘价，失败返回 None
     """
+    if not _IFIND_AVAILABLE:
+        return None
     if not ifind_login():
         return None
 
@@ -471,7 +494,7 @@ def get_onsite_option_greeks(
             print(f"[iFinD] {msg}")
             return None, msg
 
-    elif option_code and str(option_code).strip() != "" and not ifind_login():
+    elif option_code and str(option_code).strip() != "" and _IFIND_AVAILABLE and not ifind_login():
         return None, "iFinD 未登录，请先在侧边栏登录 iFinD 终端"
 
     # ---- 回退：本地 Black-Scholes 模型 ----

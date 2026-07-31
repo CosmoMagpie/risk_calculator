@@ -260,12 +260,8 @@ with tab1:
     
     # ---- 标的资产信息（所有产品类型共用）----
     st.divider()
-    st.caption("标的资产信息用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
-    col_code1, col_code2 = st.columns(2)
-    with col_code1:
-        underlying_name = st.text_input("标的名称", placeholder="如：沪深300指数", key="client_ul_name")
-    with col_code2:
-        underlying_code = st.text_input("标的代码", placeholder="如：000300 或 000300.SH", key="client_ul_code")
+    st.caption("标的资产代码用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
+    underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="client_ul_code")
 
     # ---- 场外卖出期权保证金（影响净资本扣减）----
     option_margin_amount = None
@@ -324,7 +320,7 @@ with tab1:
         "direction": en_direction,
         "notional": notional,
         "underlying_type": underlying_type,
-        "underlying_name": (underlying_name or "").strip(),
+        "underlying_name": None,
         "underlying_code": (underlying_code or "").strip(),
         "option_type": CN_OPTION_TYPE[client_option_type] if client_option_type else None,
         "premium_rate": premium_rate,
@@ -378,7 +374,7 @@ with tab2:
             option_type = None
             delta_valid = True  # 非期权工具默认通过校验
             stock_type_value = None  # ETF/个股的标的资产分类，通过下方下拉框赋值
-            etf_name = etf_code = stock_name = stock_code = future_ul_code = None
+            etf_code = stock_code = future_ul_code = None
             option_code = option_ul_code = otc_underlying_code = None
             option_margin = option_margin_rate = None
             futures_margin_rate = future_delta = future_type = None
@@ -392,7 +388,6 @@ with tab2:
                     help="参见上方「标的资产分类」表格。宽基ETF选「指数成分股」RSF=10%；非宽基ETF选「一般上市公司股票」RSF=50%"
                 )
                 st.caption("ETF代码为有效对冲判定必填项；若不填，系统将无法判定标的一致/相关性，风险资本准备按最保守的单边敞口计提")
-                etf_name = st.text_input("ETF名称")
                 etf_code = st.text_input("ETF代码")
 
             
@@ -402,7 +397,6 @@ with tab2:
                 ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
                 key="stock_stock_type")
                 st.caption("股票代码为有效对冲判定必填项；若不填，系统将无法判定标的一致/相关性，风险资本准备按最保守的单边敞口计提")
-                stock_name = st.text_input("股票名称")
                 stock_code = st.text_input("股票代码")
             
             elif tool_type == "场内期货":
@@ -447,7 +441,7 @@ with tab2:
                 )
 
                 # ---- 通过 iFinD 获取 Delta ----
-                option_code = st.text_input("场内期权代码", placeholder="如：10011855", key="new_option_code")
+                option_code = st.text_input("场内期权代码", placeholder="如：10011855.SH", key="new_option_code")
                 option_ul_code = st.text_input("标的代码", placeholder="如：510050.SH", key="option_ul_code")
 
                 if "ifind_delta_msg" not in st.session_state:
@@ -568,7 +562,7 @@ with tab2:
                     "direction": CN_HEDGE_DIRECTION[tool_direction],
                     "notional": tool_notional,
                     "underlying_type": CN_STOCK_TYPE.get(stock_type_value, "index_component") if stock_type_value else None,
-                    "underlying_name": (etf_name or stock_name or "").strip(),
+                    "underlying_name": None,
                     "underlying_code": (etf_code or stock_code or future_ul_code or option_ul_code or otc_underlying_code or "").strip(),
                     "tool_code": (option_code or "").strip(),
                     "cash_spent": cash_spent,

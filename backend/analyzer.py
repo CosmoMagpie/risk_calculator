@@ -138,7 +138,7 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
         "leverage_old": leverage_old,
         "leverage_new": leverage_new,
         "leverage_change": leverage_new - leverage_old,
-        "leverage_status": "safe" if leverage_new >= 0.12 else "warning" if leverage_new >= 0.08 else "danger",
+        "leverage_status": "safe" if leverage_new >= 0.096 else "warning" if leverage_new >= 0.08 else "danger",
 
         # -- 风险覆盖率 --
         "risk_coverage_old": risk_old,

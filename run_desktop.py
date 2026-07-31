@@ -1,0 +1,114 @@
+# ============================================================
+# run_desktop.py - 桌面启动器（PyInstaller 打包入口）
+# ============================================================
+# 用法：
+#   开发环境：python run_desktop.py
+#   打包后：  直接双击生成的 .exe 文件
+#
+# 工作原理：
+#   通过 Streamlit 内部 bootstrap API 启动 Web 服务，
+#   自动打开浏览器，用户操作完成后关闭窗口即可退出。
+# ============================================================
+
+import os
+import sys
+import socket
+import webbrowser
+import threading
+import time
+
+
+def find_free_port(start: int = 8501, max_attempts: int = 100) -> int:
+    """找到一个未被占用的端口"""
+    for port in range(start, start + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return 8501  # 兜底
+
+
+def get_app_path() -> str:
+    """获取 app.py 的路径（兼容 PyInstaller 打包与开发环境）"""
+    if getattr(sys, "frozen", False):
+        # PyInstaller 打包后，sys._MEIPASS 是临时解压目录
+        base_dir = sys._MEIPASS
+    else:
+        # 开发环境：run_desktop.py 所在目录
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 优先查找项目根目录下的 app.py
+    candidates = [
+        os.path.join(base_dir, "app.py"),
+        os.path.join(base_dir, "..", "app.py"),
+        os.path.join(os.path.dirname(__file__), "app.py"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return os.path.abspath(p)
+
+    raise FileNotFoundError(
+        "未找到 app.py。请确保 app.py 与 run_desktop.py 在同一目录下。\n"
+        f"已尝试路径：{candidates}"
+    )
+
+
+def main():
+    """启动 Streamlit 应用"""
+    app_path = get_app_path()
+    port = find_free_port()
+
+    # 设置环境变量（Streamlit 会读取）
+    os.environ["STREAMLIT_SERVER_PORT"] = str(port)
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    os.environ["STREAMLIT_THEME_BASE"] = "light"
+
+    print(f"[桌面启动器] 应用路径: {app_path}")
+    print(f"[桌面启动器] 服务端口: {port}")
+    print(f"[桌面启动器] 正在启动，请稍候...")
+
+    # 延迟打开浏览器（等服务器启动）
+    def open_browser():
+        time.sleep(2)
+        url = f"http://127.0.0.1:{port}"
+        print(f"[桌面启动器] 正在打开浏览器: {url}")
+        webbrowser.open(url)
+
+    threading.Thread(target=open_browser, daemon=True).start()
+
+    # 通过 Streamlit 内部 API 启动
+    # 注意：sys.argv 会影响 streamlit bootstrap 的行为
+    sys.argv = [
+        "streamlit",
+        "run",
+        app_path,
+        f"--server.port={port}",
+        "--server.headless=true",
+        "--browser.gatherUsageStats=false",
+        "--server.enableCORS=false",
+        "--server.enableXsrfProtection=false",
+    ]
+
+    try:
+        import streamlit.web.bootstrap as bootstrap
+        bootstrap.run(
+            main_script_path=app_path,
+            is_hello=False,
+            args=[],
+            flag_options={},
+        )
+    except KeyboardInterrupt:
+        print("\n[桌面启动器] 用户中断，正在退出...")
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"[桌面启动器] 运行异常: {e}")
+        input("\n按回车键退出...")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
