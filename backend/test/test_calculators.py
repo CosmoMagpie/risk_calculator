@@ -93,11 +93,13 @@ def test_option_short():
     check("NSFR RSF (short call)", abs(nsfr["rsf_change"] - 620.0) < 0.01,
           f"got {nsfr['rsf_change']}")
 
-    # Risk Reserve (unhedged)
+    # Risk Reserve (unhedged，对冲未生效)
     rr = calc_total_risk_reserve(otc, hedges, is_hedge_effective=False)
     # S_client = S_short = max(5*200, 10000*0.5%) = 1000
-    # Market risk = 1000 × 30% × 1.0 = 300
-    check("RiskReserve unhedged (short call)", abs(rr - 300.0) < 0.01,
+    # 客户端 Market risk = 1000 × 30% × 1.0 = 300
+    # 对冲端 ETF index 5000 × 8% = 400（未生效对冲需单独计提）
+    # Total = 700
+    check("RiskReserve unhedged (short call)", abs(rr - 700.0) < 0.01,
           f"got {rr}")
 
     # Risk Reserve (hedged)
@@ -158,8 +160,10 @@ def test_swap():
     # 总 = -160
     check("LCR HQLA (swap)", abs(lcr["hqla_change"] - (-160.0)) < 0.01,
           f"got {lcr['hqla_change']}")
-    # COF: N × 0.2% = 20000 × 0.002 = 40
-    check("LCR COF (swap)", abs(lcr["net_cof_change"] - 40.0) < 0.01,
+    # COF: client N × 0.2% = 20000 × 0.002 = 40
+    # hedge: 股指期货 18000 × 20% = 3600
+    # total = 3640
+    check("LCR COF (swap)", abs(lcr["net_cof_change"] - 3640.0) < 0.01,
           f"got {lcr['net_cof_change']}")
 
     # NSFR
@@ -177,10 +181,11 @@ def test_swap():
     check("individual-stock", _is_individual_stock(otc))
 
     rr = calc_total_risk_reserve(otc, hedges, is_hedge_effective=False)
-    # Market: S_client=2000, 2000×30%=600, penalty ×2 = 1200
+    # Market client: S_client=2000, 2000×30%=600, penalty ×2 = 1200
+    # Market hedge: 期货 18000×15%×30% = 810（未生效对冲单独计提）
     # Credit: 20000×5%=1000
-    # Total: (1200+1000)×1.0 = 2200
-    check("RiskReserve unhedged (swap penalty)", abs(rr - 2200.0) < 0.01,
+    # Total: (1200+810+1000)×1.0 = 3010
+    check("RiskReserve unhedged (swap penalty)", abs(rr - 3010.0) < 0.01,
           f"got {rr}")
 
     rr_h = calc_total_risk_reserve(otc, hedges, is_hedge_effective=True)
@@ -529,6 +534,39 @@ def test_stress_loss_estimator():
 
 
 # ============================================================
+# 7. 补充：未生效对冲的资本与 LCR 覆盖
+# ============================================================
+def test_ineffective_hedge_risk_and_lcr():
+    print("\n=== 未生效对冲：对冲端自身资本 + LCR 流出 ===")
+
+    # 卖出场外期权 + 股指期货对冲，但未达成有效对冲
+    otc = OtcContract(
+        contract_type="call_option", direction="short", notional=10000.0,
+        underlying_type="index_component", underlying_code="000300",
+        option_type="call_option", premium_rate=5.0, term_days=180,
+        stress_loss=200.0, expected_yield=0.08,
+    )
+    # 期货空头：Delta = -notional，与客户端 +Delta 方向相反但金额不等，未达 80%
+    futures = make_hedge(tool_type="futures", notional=500.0, direction="short",
+                         underlying_code="000300")
+
+    # 客户端 RiskCap = 1000 × 30% = 300
+    # 对冲端 RiskCap = 500 × 15% × 30% = 22.5
+    rr = calc_total_risk_reserve(otc, [futures], is_hedge_effective=False)
+    check("RiskReserve ineffective hedge (option + futures)",
+          abs(rr - 322.5) < 0.01, f"got {rr}")
+
+    # LCR 交易端流出：股指期货 500 × 20% = 100
+    lcr = calc_lcr_impact(otc, [futures])
+    # client: 500; hedge HQLA: -500×12% = -60; total HQLA = 440
+    # client COF: 1000×20% = 200; hedge COF: 500×20% = 100; total = 300
+    check("LCR hedge outflow (futures 20%)",
+          abs(lcr["net_cof_change"] - 300.0) < 0.01, f"got {lcr['net_cof_change']}")
+    check("LCR HQLA with futures hedge",
+          abs(lcr["hqla_change"] - 440.0) < 0.01, f"got {lcr['hqla_change']}")
+
+
+# ============================================================
 # 运行
 # ============================================================
 if __name__ == "__main__":
@@ -542,6 +580,7 @@ if __name__ == "__main__":
     test_helpers()
     test_leverage()
     test_stress_loss_estimator()
+    test_ineffective_hedge_risk_and_lcr()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

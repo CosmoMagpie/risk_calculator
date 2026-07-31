@@ -299,10 +299,18 @@ class OtcContract:
                 return self.equity_swap_delta * self.notional * is_long
             return DEFAULT_CONFIG["client"]["equity_swap_delta"] * self.notional * is_long
 
-        # --- 收益凭证Delta（默认0，固收产品无权益敞口）---
+        # --- 收益凭证Delta ---
+        # 固定收益凭证：无权益敞口，Delta = 0
+        # 浮动收益凭证（含内嵌期权）：视同卖出场外期权，按 option_delta 或默认平值 0.5 计算
         elif "income_certificate" in self.contract_type:
-            if self.income_certificate_delta is not None:
-                return self.income_certificate_delta * self.notional * is_long
-            return DEFAULT_CONFIG["client"]["income_certificate_delta"] * self.notional * is_long
+            if self.stress_loss is None:
+                # 固定收益凭证
+                if self.income_certificate_delta is not None:
+                    return self.income_certificate_delta * self.notional * is_long
+                return DEFAULT_CONFIG["client"]["income_certificate_delta"] * self.notional * is_long
+            # 浮动收益凭证：默认按卖出看涨期权近似（券商卖出期权，标的价格上涨时亏损，Delta 为负）
+            if self.option_delta is not None:
+                return -abs(self.option_delta) * self.notional
+            return -DEFAULT_CONFIG["client"]["atm_option_delta"] * self.notional
 
         return 0.0

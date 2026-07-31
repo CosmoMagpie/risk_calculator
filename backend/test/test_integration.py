@@ -244,6 +244,19 @@ def test_hedge_trade():
     check("get_tool_underlying_code returns None when not set",
           etf.get_tool_underlying_code() is None)
 
+    # ---- otc_hedge / private_fund Delta 不再返回 None ----
+    otc_h_delta = HedgeTrade(tool_type="otc_hedge", direction="long",
+                             notional=400, underlying_code="000300").get_hedge_delta_amount()
+    check("otc_hedge delta = +notional", math.isclose(otc_h_delta, 400.0))
+
+    otc_h_short_delta = HedgeTrade(tool_type="otc_hedge", direction="short",
+                                   notional=400).get_hedge_delta_amount()
+    check("otc_hedge short delta = -notional", math.isclose(otc_h_short_delta, -400.0))
+
+    pf_delta = HedgeTrade(tool_type="private_fund", direction="long",
+                          notional=100, subscription_amount=80).get_hedge_delta_amount()
+    check("private_fund delta = subscription_amount", math.isclose(pf_delta, 80.0))
+
 
 # ============================================================
 # 4. Analyzer 端到端
@@ -372,6 +385,15 @@ def test_analyzer_e2e():
     r_liq = analyze_contract(cert_long, [])
     check("e2e liquidity improvement: ro_lcr = 999 (sentinel)",
           math.isclose(r_liq["ro_lcr"], 999.0))
+
+    # ---- 场景10：浮动收益凭证 Delta 非零，可参与有效对冲判定 ----
+    cert_float = ClientContract(
+        contract_type="income_certificate", direction="buy", notional=800,
+        underlying_type="index_component", underlying_code="000300",
+        funds_raised=800, stress_loss=60, term_days=270
+    )
+    check("floating cert delta < 0 (short embedded option)",
+          cert_float.get_otc_delta_amount() < 0)
 
 
 # ============================================================

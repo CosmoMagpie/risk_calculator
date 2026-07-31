@@ -184,7 +184,22 @@ class HedgeTrade:
             return DEFAULT_CONFIG["trade"]["future_delta"] * self.notional * is_long
 
         # --- ETF/股票：Delta直接等于名义价值 ---
-        elif self.tool_type == "etf" or self.tool_type == "stock":
+        elif self.tool_type in ("etf", "stock"):
             return self.notional if self.direction == "long" else -self.notional
+
+        # --- 场外背对背对冲：按权益互换处理，Delta ≈ 名义价值 × 方向 ---
+        # 若为背对背期权平盘，应额外提供 option_delta / option_type 字段；
+        # 当前未提供时，保守按互换 100% Delta 近似。
+        elif self.tool_type == "otc_hedge":
+            if self.option_delta is not None:
+                is_call = 1 if self.option_type == "call_option" else -1
+                return self.option_delta * self.notional * is_call * (1 if self.direction == "long" else -1)
+            return self.notional if self.direction == "long" else -self.notional
+
+        # --- 私募基金：默认按满仓权益近似，Delta = 申购金额 × 方向 ---
+        # 后续可新增 fund_beta / fund_delta 字段提高精度
+        elif self.tool_type == "private_fund":
+            amount = self.subscription_amount if self.subscription_amount is not None else self.notional
+            return amount if self.direction == "long" else -amount
 
         return None

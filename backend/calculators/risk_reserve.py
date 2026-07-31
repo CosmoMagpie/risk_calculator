@@ -133,6 +133,51 @@ def _is_individual_stock(otc: OtcContract) -> bool:
     return otc.underlying_type not in ("index_component",)
 
 
+def _calc_hedge_market_risk(hedge_list: List[HedgeTrade]) -> float:
+    """
+    未达成有效对冲时，单独计算各对冲工具自身的市场风险资本准备（万元，不含 k_class）
+
+    监管逻辑：对冲端头寸若不满足有效对冲条件，应作为独立自营头寸按其对应类别计提。
+      - ETF/股票现货：按标的属性分别适用 8% / 25% / 50% / 80%
+      - 股指期货：投资规模 = 名义价值 × 15%，市场风险准备 = 投资规模 × 30%
+      - 卖出场内期权：投资规模 = Delta金额 × 15%，市场风险准备 = 投资规模 × 30%
+      - 买入场内期权：投资规模 = 权利金，市场风险准备 = 权利金 × 100%
+      - 场外背对背：按权益互换口径，投资规模 = 名义本金 × 10%，计提 30%
+      - 私募基金：归入集合及信托等产品，暂按 25% 计提（可穿透时替换为底层资产口径）
+    """
+    total = 0.0
+    for h in hedge_list:
+        tt = h.tool_type
+
+        if tt in ("etf", "stock"):
+            st = h.underlying_type or h.stock_type or "general_stock"
+            rate = RATES.get(st, 0.25)
+            total += h.notional * rate
+
+        elif tt == "futures":
+            # 股指期货投资规模 = 名义价值 × 15%；权益类衍生品计提 30%
+            total += h.notional * 0.15 * RATES["stock_index_future"]
+
+        elif tt == "onsite_option":
+            if h.direction == "short":
+                s_short = abs(h.option_delta or 0.5) * h.notional * 0.15
+                total += s_short * RATES["equity_short_option"]
+            else:
+                premium = h.option_premium if h.option_premium is not None else h.notional * DEFAULT_CONFIG["trade"]["onsite_option_premium_rate"]
+                total += premium * RATES["equtity_long_option"]
+
+        elif tt == "otc_hedge":
+            # 背对背平盘目前按权益互换口径保守处理
+            total += h.notional * 0.10 * RATES["equity_swap"]
+
+        elif tt == "private_fund":
+            # 私募基金归入集合及信托等产品，附件2标准为 25%
+            amount = h.subscription_amount if h.subscription_amount is not None else 0.0
+            total += amount * 0.25
+
+    return total
+
+
 # ============================================================
 # 各产品市场风险资本准备
 # ============================================================
@@ -150,11 +195,12 @@ def _calc_option_market_risk(
         # 达成有效对冲：(|S_client| + |S_hedge|) × 5%
         return (s_client + s_hedge_total) * 0.05
 
-    # 单边未对冲
+    # 单边未对冲：客户端 + 对冲端各自独立计提
     if otc.direction == "buy":
-        return s_client * RATES["equtity_long_option"]   # 买入期权 100%
+        client_risk = s_client * RATES["equtity_long_option"]   # 买入期权 100%
     else:
-        return s_client * RATES["equity_short_option"]   # 卖出期权 30%
+        client_risk = s_client * RATES["equity_short_option"]   # 卖出期权 30%
+    return client_risk + _calc_hedge_market_risk(hedge_list)
 
 
 def _calc_swap_market_risk(
@@ -172,7 +218,12 @@ def _calc_swap_market_risk(
     if is_hedge_effective and hedge_list:
         reserve = (s_client + s_hedge_total) * 0.05
     else:
-        reserve = s_client * RATES["equity_swap"]   # N × 10% × 30% = N × 3%
+        # 未对冲：客户端 + 对冲端各自独立计提；仅客户端部分受惩罚倍数影响
+        client_risk = s_client * RATES["equity_swap"]   # N × 10% × 30% = N × 3%
+        if is_penalty:
+            client_risk *= 2.0
+        reserve = client_risk + _calc_hedge_market_risk(hedge_list)
+        return reserve
 
     if is_penalty:
         reserve *= 2.0
@@ -196,7 +247,8 @@ def _calc_income_cert_market_risk(
     if is_hedge_effective and hedge_list:
         return (s_client + s_hedge_total) * 0.05
 
-    return s_client * RATES["equity_short_option"]  # S_short × 30%
+    # 未对冲：内嵌期权 + 对冲端各自独立计提
+    return s_client * RATES["equity_short_option"] + _calc_hedge_market_risk(hedge_list)  # S_short × 30%
 
 
 # ============================================================

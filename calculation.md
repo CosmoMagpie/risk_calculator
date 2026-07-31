@@ -93,8 +93,18 @@ $$S_{\text{short}} = \max\left(5 \times L_{\text{stress}},\, N \times 0.5\%\righ
 $$\text{RiskCap}_{\text{short}} = S_{\text{short}} \times 30\% \times k_{\text{class}}$$
 - 情况2：单边买入
 $$\text{RiskCap}_{\text{long}} = S_{\text{long}} \times 100\% \times k_{\text{class}} = P \times 100\% \times k_{\text{class}}$$
-- 情况3：背靠背对冲
-  首先判断是否达成有效对冲： 对冲比例 $R_{\text{delta}} = \left\vert{} \frac{\text{Delta}_{\text{hedge}}}{\text{Delta}_{\text{client}}} \right\vert{} \in [80\%, 125\%]$，且标的相关性 $\ge 95\%$。计算公式：
+- 情况3：未达成有效对冲但配置了交易端对冲
+  若对冲组合不满足监管有效对冲条件（相关性 $<95\%$ 或 Delta 比例不在 $80\%\sim125\%$），则客户端与对冲端应作为独立头寸分别计提：
+$$\text{RiskCap}_{\text{unhedged}} = \text{RiskCap}_{\text{client}} + \text{RiskCap}_{\text{hedge}}$$
+  其中 $\text{RiskCap}_{\text{client}}$ 按情况1或情况2计算；$\text{RiskCap}_{\text{hedge}}$ 按各对冲工具类型分别适用：
+  - 一揽子股票/ETF：$\text{市值} \times (8\% \text{ / } 25\% \text{ / } 50\% \text{ / } 80\%)$（对应指数成分股/一般上市股票/流通受限/其他）
+  - 股指期货：$\text{名义价值} \times 15\% \times 30\%$
+  - 卖出场内期权：$\text{Delta金额} \times 15\% \times 30\%$
+  - 买入场内期权：$\text{权利金} \times 100\%$
+  - 场外背对背：按权益互换口径，$N \times 10\% \times 30\%$
+  - 私募基金：暂按集合及信托产品口径，$\text{申购金额} \times 25\%$
+- 情况4：背靠背且达成有效对冲
+  对冲比例 $R_{\text{delta}} = \left\vert{} \frac{\text{Delta}_{\text{hedge}}}{\text{Delta}_{\text{client}}} \right\vert{} \in [80\%, 125\%]$，且标的相关性 $\ge 95\%$。计算公式：
 $$\text{RiskCap}_{\text{hedged}} = (\vert{}S_{\text{client}}\vert{} + \vert{}S_{\text{hedge}}\vert{}) \times 5\% \times k_{\text{class}}$$
 注：$S_{\text{hedge}}$ 为对冲工具的投资规模。若为场外背靠背同上文算法；若为一揽子股票/现货，则为现货市值；若为场内股指期货，则为名义价值的15%。
 
@@ -107,8 +117,15 @@ $$\Delta \text{LCR} = \frac{\text{HQLA}_{\text{base}} + \Delta \text{HQLA}}{\tex
    - 客户端：收到权利金 $\Delta \text{HQLA}_{\text{client}}= +P$ ；支付权利金 $\Delta \text{HQLA}_{\text{client}} = -P$
    - 交易端：若买入一揽子股票/ETF（沪深300/中证500/宽基）：现金流出导致 $\Delta \text{HQLA}_{\text{hedge}}$ 减少 100%市值，但买入的现货本身具有 50% 的 HQLA 折算率，故综合 $\Delta \text{HQLA}_{\text{hedge}} = - \text{现货市值} \times 50\%$。
     若买入一般股票或支付期货保证金、对冲期权权利金，相关资产折算率为 0%，因此综合 $\Delta \text{HQLA}_{\text{hedge}} = - 100\% \times \text{实际支付金额}$。
-- b. 未来 30 日现金净流出增量（$\Delta \text{Outflow}$）对于卖出期权（场景 1），需计入 LCR 表外项目的资金流出折算：
+- b. 未来 30 日现金净流出增量（$\Delta \text{Outflow}$）由客户端与交易端共同构成：
+$$\Delta \text{Outflow} = \Delta \text{Outflow}_{\text{client}} + \Delta \text{Outflow}_{\text{hedge}}$$
+   - 客户端：卖出期权时按表外项目折算：
 $$\Delta \text{Outflow}_{\text{short}} = S_{\text{short}} \times 20\%$$
+   - 交易端：对冲工具若涉及衍生品，按《流动性覆盖率计算表》注7单独计提自营资金流出：
+     - 场内股指期货：$\Delta \text{Outflow} = \text{期货名义价值} \times 20\%$
+     - 卖出场内期权：$\Delta \text{Outflow} = \text{Delta金额} \times 15\% \times 20\%$
+     - 场外背对背互换：$\Delta \text{Outflow} = N \times 0.2\%$
+     - ETF/股票现货、买入场内期权、私募基金：$\Delta \text{Outflow} = 0$
 
 **2. 净稳定资金率 (NSFR) 变动量**
 $$\Delta \text{NSFR} = \frac{\text{ASF}_{\text{base}} + \Delta \text{ASF}}{\text{RSF}_{\text{base}} + \Delta \text{RSF}} - \text{NSFR}_{\text{base}}$$
@@ -165,10 +182,11 @@ $$S_{\text{swap}} = N \times 10\%$$
 收益互换的资本占用分为市场风险与信用风险两部分。合计新增风险资本准备：
 $$\text{RiskCap}_{\text{unhedged}} = \text{RiskCap}_{\text{market}} + \text{RiskCap}_{\text{credit}}$$
 
-* **情况1：单边未对冲**
+* **情况1：单边未对冲（含未达成有效对冲的对冲组合）**
 * a. 市场风险资本准备：
-    $$\text{RiskCap}_{\text{market}} = S_{\text{swap}} \times 30\% \times k_{\text{class}} = N \times 3\% \times k_{\text{class}}$$
-    *惩罚项：* 若同时满足条件A（非全额保证金）与条件B（境内个股），该笔市场风险资本准备需**加倍（即 $\times 2$）**。
+    - 客户端：$\text{RiskCap}_{\text{market, client}} = S_{\text{swap}} \times 30\% \times k_{\text{class}} = N \times 3\% \times k_{\text{class}}$
+    - *惩罚项：* 若同时满足条件A（非全额保证金）与条件B（境内个股），该笔市场风险资本准备需**加倍（即 $\times 2$）**。
+    - 交易端：若配置了未生效的对冲工具，按各工具类型分别计提（参见场外期权"情况3"）。
 * b. 信用风险资本准备（仅当满足条件A即非全额保证金时计提）：
     $$\text{RiskCap}_{\text{credit}} = N \times 5\% \times k_{\text{class}}$$
 
@@ -190,6 +208,7 @@ $$\text{RiskCap}_{\text{unhedged}} = \text{RiskCap}_{\text{market}} + \text{Risk
 * b. 未来 30 日现金净流出增量（$\Delta \text{Outflow}$）：
 收益互换作为自营业务及长期投资资金流出，需按名义本金折算计入增量：
 $$\Delta \text{Outflow}_{\text{client}} = N \times 0.2\%$$
+同时交易端对冲工具若涉及衍生品，按 LCR 口径加计其自营资金流出（股指期货 $N \times 20\%$、卖出场内期权 $\text{Delta} \times 15\% \times 20\%$、背对背互换 $N \times 0.2\%$）。
 
 **2. 净稳定资金率 (NSFR) 变动量**
 
@@ -227,8 +246,9 @@ $$S_{\text{short}} = \max\left(5 \times L_{\text{stress}},\, N \times 0.5\%\righ
 * 情况1：固定收益凭证（无内嵌衍生品）
 $$\text{RiskCap} = 0$$
 
-* 情况2：浮动收益凭证（单边未对冲内嵌期权）
-$$\text{RiskCap} = S_{\text{short}} \times 30\% \times k_{\text{class}}$$
+* 情况2：浮动收益凭证（单边未对冲内嵌期权，或对冲未达成有效对冲）
+$$\text{RiskCap} = S_{\text{short}} \times 30\% \times k_{\text{class}} + \text{RiskCap}_{\text{hedge}}$$
+  其中 $\text{RiskCap}_{\text{hedge}}$ 按场外期权"情况3"口径对未生效对冲工具分别计提。
 
 * 情况3：浮动收益凭证（内嵌期权达成有效对冲）
 *判定条件同场外期权（Delta匹配且相关性达标）。*
@@ -244,6 +264,7 @@ $$\text{RiskCap}_{\text{hedged}} = (\vert{}S_{\text{short}}\vert{} + \vert{}S_{\
     $$\Delta \text{Outflow} = \Delta \text{Outflow}_{\text{debt}} + \Delta \text{Outflow}_{\text{short}}$$
     * 债务本金部分（$\Delta \text{Outflow}_{\text{debt}}$）：若 $T \le 30\text{天}$，$\Delta \text{Outflow}_{\text{debt}} = V \times 100\%$；若 $T > 30\text{天}$，该项为 0。
     * 内嵌期权部分（$\Delta \text{Outflow}_{\text{short}}$）：若为浮动凭证，衍生品表外项目带来流出增量 $\Delta \text{Outflow}_{\text{short}} = S_{\text{short}} \times 20\%$。
+    * 交易端对冲工具若涉及衍生品，按 LCR 口径加计其自营资金流出。
 
 **2. 净稳定资金率 (NSFR) 变动量**
 * a. 可用稳定资金增量（$\Delta \text{ASF}$）：
