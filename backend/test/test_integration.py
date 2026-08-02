@@ -324,6 +324,9 @@ def test_analyzer_e2e():
     # 募集500 - 买ETF 400 = 净现金 +100
     check("e2e fixed cert: net_day1_cash = 100",
           math.isclose(r3["net_day1_cash"], 100.0))
+    # 收益凭证表内增量 = V 本身（募集资金全额入表，对冲只改变资产形态）
+    check("e2e fixed cert: assets_change = V = 500",
+          math.isclose(r3["assets_change"], 500.0))
     # roc sentinel：分母为0 → 999
     check("e2e fixed cert: roc = 999 (division by zero sentinel)",
           math.isclose(r3["roc"], 999.0))
@@ -394,6 +397,27 @@ def test_analyzer_e2e():
     )
     check("floating cert delta < 0 (short embedded option)",
           cert_float.get_otc_delta_amount() < 0)
+
+    # ---- 场景11：资本杠杆率分子口径与风险覆盖率一致（扣减保证金）----
+    # 卖出期权 + 期货对冲：net_capital_change < 0（保证金扣减核心净资本）
+    # 杠杆率分母增加，分子扣减 → leverage_new 应低于仅分母增加时的值
+    lev_opt = ClientContract(
+        contract_type="call_option", direction="short", notional=1000,
+        underlying_type="index_component",
+        option_type="call_option", premium_rate=5.0,
+        stress_loss=50, term_days=90
+    )
+    lev_hedge = HedgeTrade(tool_type="futures", direction="short", notional=800,
+                           underlying_type="index_component", futures_margin=96)
+    r_lev = analyze_contract(lev_opt, [lev_hedge])
+    check("e2e leverage numerator deducts margin",
+          r_lev["net_capital_change"] < 0)
+    # 手动重算：分子 = 基准净资本 + Δ净资本
+    nc = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000
+    expected_new = (nc + r_lev["net_capital_change"]) / (
+        DEFAULT_CONFIG["firm"]["on_off_balance_total_asset_base"] / 10000 + r_lev["assets_change"])
+    check("e2e leverage_new uses adjusted net capital",
+          math.isclose(r_lev["leverage_new"], expected_new))
 
 
 # ============================================================

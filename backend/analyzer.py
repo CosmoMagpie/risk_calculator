@@ -60,7 +60,13 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     nsfr = calc_nsfr_impact(otc, hedge_list)
 
     # ===== 步骤6：资本杠杆率影响 =====
-    assets_change = calc_leverage_impact(otc, hedge_list, net_day1_cash)
+    # 收益凭证：募集资金 V 全额计入表内资产（首日现金流入），对冲支出只改变
+    # 资产形态（现金→股票/保证金），并不减少表内资产总额，故 Δ表内 = V 本身。
+    if otc.contract_type == "income_certificate":
+        on_balance_base = otc.funds_raised if otc.funds_raised is not None else otc.notional
+    else:
+        on_balance_base = net_day1_cash
+    assets_change = calc_leverage_impact(otc, hedge_list, on_balance_base)
 
     # ===== 步骤7：计算四大指标的前后对比 =====
 
@@ -79,15 +85,16 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
 
     # --- 资本杠杆率 ---
     # 杠杆率 = 核心净资本 / 表内外资产总额 ≥ 8%
+    # 分子口径与风险覆盖率保持一致：核心净资本需扣减期货（期权）保证金占用
     nc = DEFAULT_CONFIG["firm"]["net_capital_base"] / 10000
+    nc_adjusted = nc + net_capital_change
     ta_base = DEFAULT_CONFIG["firm"]["on_off_balance_total_asset_base"] / 10000
     leverage_old = nc / ta_base if ta_base > 0 else 999
-    leverage_new = nc / (ta_base + assets_change) if (ta_base + assets_change) > 0 else 999
+    leverage_new = nc_adjusted / (ta_base + assets_change) if (ta_base + assets_change) > 0 else 999
 
     # --- 风险覆盖率 ---
     # 风险覆盖率 = (净资本 + Δ净资本) / (各项风险资本准备 + 新增风险资本准备)
     # 保证金占用会扣减净资本，因此分子需要加入 Δ净资本 调整
-    nc_adjusted = nc + net_capital_change
     risk_reserve_new = DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000 + new_risk_reserve
     risk_old = nc / (DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000)
     risk_new = nc_adjusted / risk_reserve_new if risk_reserve_new > 0 else 999

@@ -93,20 +93,26 @@ def _get_client_investment_scale(otc: OtcContract) -> float:
     return 0.0
 
 
-def _get_hedge_investment_scale(hedge: HedgeTrade) -> float:
+def _get_hedge_investment_scale(hedge: HedgeTrade, client_ct: str = "equity_swap") -> float:
     """
     获取单个对冲工具的投资规模 |S_hedge|
       现货/ETF: 市值 = notional
       期货: 名义价值 × 15%
-      场外背对背: N × 10%（按互换处理）
+      场外背对背: 期权/收益凭证类 N × 0.5%（无 stress_loss 取地板值）；
+                  互换类 N × 10%
       场内期权: 权利金（默认名义价值 × 2%）
       私募基金: 申购金额
+
+    client_ct 用于区分场外背对背对冲的结构（期权平盘 vs 互换），
+    与 leverage.py 中 _calc_hedge_off_balance 的口径保持一致。
     """
     if hedge.tool_type in ("etf", "stock"):
         return hedge.notional
     elif hedge.tool_type == "futures":
         return hedge.notional * 0.15
     elif hedge.tool_type == "otc_hedge":
+        if client_ct in ("call_option", "put_option", "income_certificate"):
+            return hedge.notional * 0.005
         return hedge.notional * 0.10
     elif hedge.tool_type == "onsite_option":
         if hedge.option_premium is not None:
@@ -133,7 +139,7 @@ def _is_individual_stock(otc: OtcContract) -> bool:
     return otc.underlying_type not in ("index_component",)
 
 
-def _calc_hedge_market_risk(hedge_list: List[HedgeTrade]) -> float:
+def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equity_swap") -> float:
     """
     未达成有效对冲时，单独计算各对冲工具自身的市场风险资本准备（万元，不含 k_class）
 
@@ -142,7 +148,7 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade]) -> float:
       - 股指期货：投资规模 = 名义价值 × 15%，市场风险准备 = 投资规模 × 30%
       - 卖出场内期权：投资规模 = Delta金额 × 15%，市场风险准备 = 投资规模 × 30%
       - 买入场内期权：投资规模 = 权利金，市场风险准备 = 权利金 × 100%
-      - 场外背对背：按权益互换口径，投资规模 = 名义本金 × 10%，计提 30%
+      - 场外背对背：期权/收益凭证类按 N×0.5%×30%，互换类按 N×10%×30%
       - 私募基金：归入集合及信托等产品，暂按 25% 计提（可穿透时替换为底层资产口径）
     """
     total = 0.0
@@ -167,8 +173,9 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade]) -> float:
                 total += premium * RATES["equtity_long_option"]
 
         elif tt == "otc_hedge":
-            # 背对背平盘目前按权益互换口径保守处理
-            total += h.notional * 0.10 * RATES["equity_swap"]
+            # 背对背平盘口径与 leverage.py 保持一致：期权类 N×0.5%，互换类 N×10%
+            scale = h.notional * (0.005 if client_ct in ("call_option", "put_option", "income_certificate") else 0.10)
+            total += scale * RATES["equity_swap"]
 
         elif tt == "private_fund":
             # 私募基金归入集合及信托等产品，附件2标准为 25%
@@ -189,7 +196,7 @@ def _calc_option_market_risk(
     场外期权的市场风险资本准备（万元，不含 k_class）
     """
     s_client = _get_client_investment_scale(otc)
-    s_hedge_total = sum(_get_hedge_investment_scale(h) for h in hedge_list)
+    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
 
     if is_hedge_effective and hedge_list:
         # 达成有效对冲：(|S_client| + |S_hedge|) × 5%
@@ -200,7 +207,7 @@ def _calc_option_market_risk(
         client_risk = s_client * RATES["equtity_long_option"]   # 买入期权 100%
     else:
         client_risk = s_client * RATES["equity_short_option"]   # 卖出期权 30%
-    return client_risk + _calc_hedge_market_risk(hedge_list)
+    return client_risk + _calc_hedge_market_risk(hedge_list, otc.contract_type)
 
 
 def _calc_swap_market_risk(
@@ -212,7 +219,7 @@ def _calc_swap_market_risk(
     惩罚条件：同时满足 条件A(非全额保证金) + 条件B(个股标的) → 加倍
     """
     s_client = _get_client_investment_scale(otc)  # N × 10%
-    s_hedge_total = sum(_get_hedge_investment_scale(h) for h in hedge_list)
+    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
     is_penalty = _is_non_full_margin_swap(otc) and _is_individual_stock(otc)
 
     if is_hedge_effective and hedge_list:
@@ -222,7 +229,7 @@ def _calc_swap_market_risk(
         client_risk = s_client * RATES["equity_swap"]   # N × 10% × 30% = N × 3%
         if is_penalty:
             client_risk *= 2.0
-        reserve = client_risk + _calc_hedge_market_risk(hedge_list)
+        reserve = client_risk + _calc_hedge_market_risk(hedge_list, otc.contract_type)
         return reserve
 
     if is_penalty:
@@ -242,13 +249,13 @@ def _calc_income_cert_market_risk(
         return 0.0  # 固定收益凭证：无市场风险资本准备
 
     s_client = _get_client_investment_scale(otc)  # S_short
-    s_hedge_total = sum(_get_hedge_investment_scale(h) for h in hedge_list)
+    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
 
     if is_hedge_effective and hedge_list:
         return (s_client + s_hedge_total) * 0.05
 
     # 未对冲：内嵌期权 + 对冲端各自独立计提
-    return s_client * RATES["equity_short_option"] + _calc_hedge_market_risk(hedge_list)  # S_short × 30%
+    return s_client * RATES["equity_short_option"] + _calc_hedge_market_risk(hedge_list, otc.contract_type)  # S_short × 30%
 
 
 # ============================================================

@@ -170,8 +170,8 @@ TEST_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "TC04",
-        "name": "收益互换（非全额保证金 + 境内个股 → 触发惩罚条件）",
-        "scenario": "客户以 10% 保证金做个股收益互换（空头），同时交易台用股指期货对冲。因同时满足条件 A（非全额保证金）和条件 B（境内个股），市场风险资本准备加倍，并额外计提信用风险资本准备。",
+        "name": "收益互换（非全额保证金 + 境内个股 → 惩罚加倍）+ 同标的股票现货对冲（有效对冲 + 惩罚叠加）",
+        "scenario": "客户以 10% 保证金做茅台个股收益互换（空头），交易台买入同标的（600519.SH）茅台股票现货对冲。因标的完全一致直接达成有效对冲，同时满足条件 A（非全额保证金）和条件 B（境内个股），有效对冲后的市场风险资本准备仍须按 2 倍计提，并额外计提信用风险资本准备——验证惩罚条件与有效对冲的叠加逻辑。",
         "client": {
             "contract_type": "equity_swap",
             "direction": "short",
@@ -185,12 +185,14 @@ TEST_CASES: List[Dict[str, Any]] = [
         },
         "hedges": [
             {
-                "tool_type": "futures",
+                "tool_type": "stock",
                 "direction": "long",
                 "notional": 18000.0,
-                "underlying_name": "沪深300股指期货",
-                "underlying_code": "000300.SH",
-                "futures_margin": 2160.0,
+                "stock_type": "general_stock",
+                "underlying_type": "general_stock",
+                "underlying_name": "贵州茅台",
+                "underlying_code": "600519.SH",
+                "cash_spent": 18000.0,
             },
         ],
     },
@@ -260,8 +262,8 @@ TEST_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "TC07",
-        "name": "浮动收益凭证（含内嵌期权）+ 股指期货对冲",
-        "scenario": "浮动收益凭证内嵌期权结构视同卖出场外期权。交易台用股指期货空头对冲内嵌期权风险。",
+        "name": "浮动收益凭证（含内嵌期权）+ 股指期货对冲（达成有效对冲）",
+        "scenario": "浮动收益凭证内嵌期权结构视同卖出场外期权（券商在标的上行时亏损），交易台用股指期货多头对冲内嵌期权风险。内嵌期权默认 Delta = -0.5×N，对冲多头 Delta = +N，比例恰为 100%，标的一致（000300.SH），达成有效对冲。",
         "client": {
             "contract_type": "income_certificate",
             "direction": "short",
@@ -277,11 +279,11 @@ TEST_CASES: List[Dict[str, Any]] = [
         "hedges": [
             {
                 "tool_type": "futures",
-                "direction": "short",
-                "notional": 40000.0,
+                "direction": "long",
+                "notional": 25000.0,
                 "underlying_name": "沪深300股指期货",
                 "underlying_code": "000300.SH",
-                "futures_margin": 4800.0,
+                "futures_margin": 3000.0,
             },
         ],
     },
@@ -350,8 +352,8 @@ TEST_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "TC10",
-        "name": "买入看跌期权 + 场内看跌期权对冲（iFinD Greeks 实时 Delta）",
-        "scenario": "买入 50ETF 看跌期权后，交易台买入 50ETF 场内看跌期权对冲。系统优先通过 iFinD 获取场内期权实时 Delta 系数。",
+        "name": "买入看跌期权 + 场内看涨期权对冲（iFinD Greeks 实时 Delta）",
+        "scenario": "买入 50ETF 看跌期权（负 Delta 敞口），交易台买入 50ETF 场内看涨期权（正 Delta）对冲。系统优先通过 iFinD 获取场内期权实时 Delta 系数。",
         "client": {
             "contract_type": "put_option",
             "direction": "buy",
@@ -370,11 +372,11 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "tool_type": "onsite_option",
                 "direction": "long",
                 "notional": 8000.0,
-                "option_type": "put_option",
-                "option_delta": -0.45,
+                "option_type": "call_option",
+                "option_delta": 0.45,
                 "option_premium": 160.0,
                 "tool_code": "10011855",
-                "underlying_name": "50ETF 场内看跌期权",
+                "underlying_name": "50ETF 场内看涨期权",
                 "underlying_code": "510050.SH",
             },
         ],
@@ -726,7 +728,7 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
             notes.append("- 浮动收益凭证：内嵌衍生品视同卖出场外期权，按 S_short × 30% 计提市场风险资本准备。")
             s_short = max(5 * client["stress_loss"], notional * 0.005)
             notes.append(f"- S_short = max(5×{client['stress_loss']}, {notional}×0.5%) = {s_short:.2f} 万元。")
-            notes.append("- 收益凭证默认 Delta 为 0，系统判定为'Delta 敞口数据缺失'，即不将凭证本身视为可对冲权益敞口。")
+            notes.append("- 浮动收益凭证默认 Delta 按卖出场外期权口径为负（视同卖出看涨期权），可参与有效对冲判定。")
 
     # 4. 期权 S_short
     if ct in ("call_option", "put_option") and direction == "short":
@@ -741,6 +743,23 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
         notes.append(f"- 净资本变动 {nc_change:,.2f} 万元，来源于期货/卖出期权保证金占用扣减。")
     else:
         notes.append("- 净资本变动为 0，本组合无额外保证金扣减。")
+
+    # 5.5 对冲端 LCR 资金流出（问题6 修复）
+    has_futures = any(h.get("tool_type") == "futures" for h in case["hedges"])
+    has_onsite_short = any(
+        h.get("tool_type") == "onsite_option" and h.get("direction") == "short"
+        for h in case["hedges"]
+    )
+    has_otc_back = any(h.get("tool_type") == "otc_hedge" for h in case["hedges"])
+    if has_futures or has_onsite_short or has_otc_back:
+        detail = []
+        if has_futures:
+            detail.append("股指期货按名义价值 × 20% 计提资金流出")
+        if has_onsite_short:
+            detail.append("卖出场内期权按 Delta金额 × 15% × 20% 计提资金流出")
+        if has_otc_back:
+            detail.append("场外背对背互换按名义本金 × 0.2% 计提资金流出")
+        notes.append("- 交易端衍生品对冲已按 LCR 口径计入自营资金流出（" + "；".join(detail) + "）。")
 
     # 6. iFinD 提示
     if case.get("ifind_trigger"):

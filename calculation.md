@@ -106,7 +106,7 @@ $$\text{RiskCap}_{\text{unhedged}} = \text{RiskCap}_{\text{client}} + \text{Risk
 - 情况4：背靠背且达成有效对冲
   对冲比例 $R_{\text{delta}} = \left\vert{} \frac{\text{Delta}_{\text{hedge}}}{\text{Delta}_{\text{client}}} \right\vert{} \in [80\%, 125\%]$，且标的相关性 $\ge 95\%$。计算公式：
 $$\text{RiskCap}_{\text{hedged}} = (\vert{}S_{\text{client}}\vert{} + \vert{}S_{\text{hedge}}\vert{}) \times 5\% \times k_{\text{class}}$$
-注：$S_{\text{hedge}}$ 为对冲工具的投资规模。若为场外背靠背同上文算法；若为一揽子股票/现货，则为现货市值；若为场内股指期货，则为名义价值的15%。
+注：$S_{\text{hedge}}$ 为对冲工具的投资规模。若为场外背靠背（期权/收益凭证平盘）同上文算法即 $\max(5\times L_{\text{stress,hedge}}, N_{\text{hedge}}\times 0.5\%)$，无压力损失数据时取地板值 $N_{\text{hedge}}\times 0.5\%$；若为收益互换背靠背，则为 $N_{\text{hedge}}\times 10\%$；若为一揽子股票/现货，则为现货市值；若为场内股指期货，则为名义价值的15%。
 
 ### 三、指标边际变动
 
@@ -144,10 +144,11 @@ $$\Delta \text{RSF} = \Delta \text{RSF}_{\text{client}} + \Delta \text{RSF}_{\te
 以上加总为$\Delta \text{RSF}_{\text{hedge}}$
 
 **3. 资本杠杆率变动**
-$$\Delta \text{资本杠杆率} = \frac{\text{核心净资本}_{\text{base}}}{\text{表内外资产总额}_{\text{base}} + \Delta \text{表内外资产总额}} - \text{资本杠杆率}_{\text{base}}$$
+$$\Delta \text{资本杠杆率} = \frac{\text{核心净资本}_{\text{base}} + \Delta \text{核心净资本}}{\text{表内外资产总额}_{\text{base}} + \Delta \text{表内外资产总额}} - \text{资本杠杆率}_{\text{base}}$$
+其中 $\Delta \text{核心净资本}$ 与风险覆盖率口径一致，为期货（期权）保证金占用对净资本的扣减（$\Delta \text{核心净资本} = \Delta \text{净资本}$）。
 其中$$\Delta \text{表内外资产总额} = \Delta \text{表内资产余额} + \Delta \text{表外项目余额}$$
 $$\Delta \text{表外项目余额}=\Delta \text{表外}_{\text{client}} + \Delta \text{表外}_{\text{hedge}}$$
-其中，$\Delta \text{表内资产余额}$等于首日净现金流入额。下面两个产品类似。
+其中，$\Delta \text{表内资产余额}$一般等于首日净现金流入额；**收益凭证例外**：募集资金 $V$ 全额计入表内资产（对冲支出只改变资产形态，不减少表内资产总额），故收益凭证的 $\Delta \text{表内资产余额} = V$。
 - a. 对于$\Delta \text{表外}_{\text{client}}$，买入期权时为0，卖出期权时
 $$\Delta \text{表外}_{\text{client}} = S_{\text{short}} = \max\left(5 \times L_{\text{stress}},\, N \times 0.5\%\right)$$
 - b. 对于$\Delta \text{表外}_{\text{hedge}}$
