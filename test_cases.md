@@ -1,922 +1,300 @@
-# 场外衍生品风控影响测算 — 典型测试样例
-
-> 生成时间：2026-08-02 15:18:12
-> iFinD 终端状态：可用（已登录）
-> 公司基准参数来源：[backend/config.py](file:///e:/Desktop/risk_cal2/backend/config.py)
-
-## 说明
-
-以下样例覆盖三种主要业务类型（场外期权、收益互换、收益凭证）及关键边界条件，包括：
-- 有效对冲 / 无效对冲判定；
-- 收益互换的惩罚条件（非全额保证金 + 境内个股）；
-- 收益凭证固定型 / 浮动型（内嵌期权）区别；
-- 需要调用 iFinD 数据的价格相关性与场内期权 Greeks 场景。
-
-每个样例包含：业务场景、完整输入参数（模块 A + 模块 B）、模型输出三层指标、关键判断说明。
-输出单位为**万元**，百分比为**小数形式**（如 0.08 = 8%）。
-
----
-
-## TC01：卖出看涨期权 + 宽基 ETF 现货对冲（未提供对冲代码 → 无效对冲）
-
-**业务场景**：典型短 call 业务，交易台买入沪深 300 ETF 做 Delta 对冲，但未填写 ETF 代码，系统按最保守方式判定对冲无效。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | call_option（看涨期权）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.08
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.72
-option_type（期权类型） | call_option（看涨期权）
-premium_rate（权利金率） | 5.0
-stress_loss（压力损失） | 200.0
-term_days（期限/天） | 180
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-cash_spent（现金支出） | 9000.0
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 9000.0
-tool_type（工具类型） | etf（ETF）
-underlying_code（标的代码） | 
-underlying_name（标的名称） | 沪深300ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -8,500.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 1,020.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | -7,500.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -2,000.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.4021% | -0.5386% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.9981% | -0.0664% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4934% | -0.0053% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2196.2143% | -32.9748% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 0.7843 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 0.1905 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.7843 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：否
-- 原因：未填写对冲工具标的代码，不满足有效对冲条件
-
-### 关键判断与说明
-
-- 未达成有效对冲：未填写对冲工具标的代码，不满足有效对冲条件
-- 场外期权按单边敞口计提市场风险资本准备：卖出 **30%**，买入 **100%**。
-- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
-- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
-- 净资本变动 -2,000.00 万元，来源于期货/卖出期权保证金占用扣减。
-
----
-
-## TC02：卖出看涨期权 + 沪深300 ETF 对冲（依赖 iFinD 价格相关性判定有效对冲）
-
-**业务场景**：与 TC01 类似，但填写了 ETF 代码 510300.SH。标的不完全相同，系统将通过 iFinD 获取 000300.SH 与 510300.SH 近一年收盘价并计算相关性，>=95% 且 Delta 比例 80%-125% 时达成有效对冲。
-
-**本用例触发的 iFinD 数据查询**：
-
-- `get_underlying_price_series(000300.SH)`
-- `get_underlying_price_series(510300.SH)`
-- `calculate_correlation_between_price_series(...)`
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | call_option（看涨期权）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.08
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.72
-option_type（期权类型） | call_option（看涨期权）
-premium_rate（权利金率） | 5.0
-stress_loss（压力损失） | 200.0
-term_days（期限/天） | 180
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-cash_spent（现金支出） | 9000.0
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 9000.0
-tool_type（工具类型） | etf（ETF）
-underlying_code（标的代码） | 510300.SH
-underlying_name（标的名称） | 沪深300ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -8,500.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 500.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | -7,500.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -2,000.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.4021% | -0.5386% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.9981% | -0.0664% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4934% | -0.0053% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2211.5436% | -17.6456% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 1.6000 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 0.1905 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.7843 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
-- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
-- 净资本变动 -2,000.00 万元，来源于期货/卖出期权保证金占用扣减。
-- 本用例依赖 iFinD 数据：
-  - `get_underlying_price_series(000300.SH)`
-  - `get_underlying_price_series(510300.SH)`
-  - `calculate_correlation_between_price_series(...)`
-
----
-
-## TC03：买入看跌期权（无对冲，风险资本准备按 100% 计提）
-
-**业务场景**：券商买入看跌期权，支付权利金，方向性敞口为做空标的。无对冲时市场风险资本准备 = 权利金 × 100%。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | put_option（看跌期权）
-direction（方向） | buy（买入 / 做多）
-expected_yield（预期年化收益率） | 0.05
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.5
-option_type（期权类型） | put_option（看跌期权）
-premium_rate（权利金率） | 3.0
-term_days（期限/天） | 90
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-无对冲工具。
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -300.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 300.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 0.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | -300.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | 0.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9031% | -0.0376% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 141.0645% | +0.0000% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4987% | +0.0001% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2220.1884% | -9.0008% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 1.6667 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 1.6667 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 不适用 | 预期创收 / ΔRSF |
-| 预期年化创收 | 500.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：否
-- 原因：未填写对冲工具标的代码，不满足有效对冲条件
-
-### 关键判断与说明
-
-- 未达成有效对冲：未填写对冲工具标的代码，不满足有效对冲条件
-- 场外期权按单边敞口计提市场风险资本准备：卖出 **30%**，买入 **100%**。
-- 净资本变动为 0，本组合无额外保证金扣减。
-
----
-
-## TC04：收益互换（非全额保证金 + 境内个股 → 惩罚加倍）+ 同标的股票现货对冲（有效对冲 + 惩罚叠加）
-
-**业务场景**：客户以 10% 保证金做茅台个股收益互换（空头），交易台买入同标的（600519.SH）茅台股票现货对冲。因标的完全一致直接达成有效对冲，同时满足条件 A（非全额保证金）和条件 B（境内个股），有效对冲后的市场风险资本准备仍须按 2 倍计提，并额外计提信用风险资本准备——验证惩罚条件与有效对冲的叠加逻辑。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | equity_swap（收益互换）
-direction（方向） | short（空头 / 卖出）
-expected_yield（预期年化收益率） | 0.06
-margin_rate（保证金率） | 10.0
-notional（名义本金） | 20000.0
-term_days（期限/天） | 365
-underlying_code（标的代码） | 600519.SH
-underlying_name（标的名称） | 贵州茅台
-underlying_type（标的类型） | general_stock（一般个股）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-cash_spent（现金支出） | 18000.0
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 18000.0
-stock_type（股票类型） | general_stock（一般个股）
-tool_type（工具类型） | stock（股票）
-underlying_code（标的代码） | 600519.SH
-underlying_name（标的名称） | 贵州茅台
-underlying_type（标的类型） | general_stock（一般个股）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -16,000.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 3,000.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 40.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | -12,000.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | 0.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 146.9276% | -2.0131% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.4674% | -0.5971% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.5009% | +0.0022% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2142.3377% | -86.8515% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 0.4000 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 0.0748 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.1304 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 1,200.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 触发收益互换惩罚条件：非全额保证金 + 境内个股，市场风险资本准备 **加倍**。
-- 同时计提信用风险资本准备 = 名义本金 × 5%。
-- 净资本变动为 0，本组合无额外保证金扣减。
-
----
-
-## TC05：收益互换（全额保证金 + 指数成分股 → 无惩罚，信用风险为 0）
-
-**业务场景**：客户以 100% 保证金做指数收益互换，无信用风险资本准备，市场风险按正常比例计提。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | equity_swap（收益互换）
-direction（方向） | short（空头 / 卖出）
-expected_yield（预期年化收益率） | 0.06
-margin_rate（保证金率） | 100.0
-notional（名义本金） | 20000.0
-term_days（期限/天） | 365
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-cash_spent（现金支出） | 18000.0
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 18000.0
-tool_type（工具类型） | etf（ETF）
-underlying_code（标的代码） | 510300.SH
-underlying_name（标的名称） | 沪深300ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | 2,000.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 1,000.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 40.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 4,000.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | 0.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 150.3121% | +1.3714% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.9343% | -0.1302% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4979% | -0.0007% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2199.4667% | -29.7225% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 1.2000 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.6000 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 1,200.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 全额保证金，信用风险资本准备为 0。
-- 净资本变动为 0，本组合无额外保证金扣减。
-
----
-
-## TC06：固定收益凭证 + 股票/ETF 组合对冲（无风险资本准备）
-
-**业务场景**：发行 60 天固定收益凭证，募集资金后配置于股票与宽基 ETF。固定收益凭证本金负债部分不计提市场风险资本准备。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | income_certificate（收益凭证）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.04
-funds_raised（募集资金） | 50000.0
-notional（名义本金） | 50000.0
-stress_loss（压力损失） | （未填写）
-term_days（期限/天） | 60
-underlying_code（标的代码） | 000001.SZ
-underlying_name（标的名称） | 平安银行
-underlying_type（标的类型） | general_stock（一般个股）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 30000.0
-stock_type（股票类型） | general_stock（一般个股）
-tool_type（工具类型） | stock（股票）
-underlying_code（标的代码） | 000001.SZ
-underlying_name（标的名称） | 一般上市公司股票
-underlying_type（标的类型） | general_stock（一般个股）
-
-#### 对冲工具 #2
-
-字段 | 值
---- | ---
-cash_spent（现金支出） | 20000.0
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 20000.0
-tool_type（工具类型） | etf（ETF）
-underlying_code（标的代码） | 510300.SH
-underlying_name（标的名称） | 沪深300ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | 0.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 0.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 0.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 50,000.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | 0.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 150.1943% | +1.2536% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 139.9652% | -1.0993% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4895% | -0.0091% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2229.1892% | +0.0000% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 不适用 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.1176 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 2,000.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：否
-- 原因：Delta 敞口数据缺失，不满足有效对冲条件
-
-### 关键判断与说明
-
-- 未达成有效对冲：Delta 敞口数据缺失，不满足有效对冲条件
-- 固定收益凭证：本金负债部分不计提市场/信用风险资本准备。
-- 收益凭证默认 Delta 为 0，系统判定为'Delta 敞口数据缺失'，即不存在可对冲的方向性权益敞口。
-- 净资本变动为 0，本组合无额外保证金扣减。
-
----
-
-## TC07：浮动收益凭证（含内嵌期权）+ 股指期货对冲（达成有效对冲）
-
-**业务场景**：浮动收益凭证内嵌期权结构视同卖出场外期权（券商在标的上行时亏损），交易台用股指期货多头对冲内嵌期权风险。内嵌期权默认 Delta = -0.5×N，对冲多头 Delta = +N，比例恰为 100%，标的一致（000300.SH），达成有效对冲。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | income_certificate（收益凭证）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.05
-funds_raised（募集资金） | 50000.0
-notional（名义本金） | 50000.0
-stress_loss（压力损失） | 300.0
-term_days（期限/天） | 90
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-futures_margin（期货保证金） | 3000.0
-notional（名义本金） | 25000.0
-tool_type（工具类型） | futures（期货）
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300股指期货
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | 47,000.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 262.50 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 5,300.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 55,250.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -3,000.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 153.8107% | +4.8700% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.8575% | -0.2070% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4786% | -0.0201% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2217.2698% | -11.9194% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 9.5238 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.7862 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 2,500.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 浮动收益凭证：内嵌衍生品视同卖出场外期权，按 S_short × 30% 计提市场风险资本准备。
-- S_short = max(5×300.0, 50000.0×0.5%) = 1500.00 万元。
-- 浮动收益凭证默认 Delta 按卖出场外期权口径为负（视同卖出看涨期权），可参与有效对冲判定。
-- 净资本变动 -3,000.00 万元，来源于期货/卖出期权保证金占用扣减。
-- 交易端衍生品对冲已按 LCR 口径计入自营资金流出（股指期货按名义价值 × 20% 计提资金流出）。
-
----
-
-## TC08：卖出看涨期权 + 场内期权对冲（依赖 iFinD 获取实时 Greeks）
-
-**业务场景**：重点测试 iFinD 场内期权 Greeks 接口。卖出 50ETF 看涨期权，交易台买入 50ETF 场内看涨期权对冲。填写场内期权合约编码后，系统通过 iFinD 获取实时 Delta 值替代手动输入。
-
-**本用例触发的 iFinD 数据查询**：
-
-- `get_onsite_option_greeks(10011855, 'delta')`
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | call_option（看涨期权）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.08
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.72
-option_type（期权类型） | call_option（看涨期权）
-premium_rate（权利金率） | 5.0
-stress_loss（压力损失） | 200.0
-term_days（期限/天） | 180
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 上证50ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 9000.0
-option_delta（期权Delta） | 0.8
-option_premium（期权权利金） | 180.0
-option_type（期权类型） | call_option（看涨期权）
-tool_code（工具代码） | 10011855
-tool_type（工具类型） | onsite_option（场内期权）
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 50ETF 场内看涨期权
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | 320.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 480.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 1,320.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -2,000.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9435% | +0.0028% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 141.0567% | -0.0078% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4918% | -0.0069% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2212.1375% | -17.0517% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 1.6667 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 6.6667 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：否
-- 原因：多头/空头 Delta 比例 74.2%，不在 80%-125% 之间
-
-### 关键判断与说明
-
-- 未达成有效对冲：多头/空头 Delta 比例 74.2%，不在 80%-125% 之间
-- 场外期权按单边敞口计提市场风险资本准备：卖出 **30%**，买入 **100%**。
-- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
-- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
-- 净资本变动 -2,000.00 万元，来源于期货/卖出期权保证金占用扣减。
-- 本用例依赖 iFinD 数据：
-  - `get_onsite_option_greeks(10011855, 'delta')`
-- 场内期权 Greeks：系统优先尝试 iFinD 实时 Delta；若查询失败或返回异常，自动回退到手动输入的 option_delta。
-
----
-
-## TC09：卖出看涨期权 + 股指期货同标的对冲（直接判定有效对冲，无需 iFinD 相关性）
-
-**业务场景**：股指期货标的代码与客户合约标的代码完全一致（均为 000300.SH），系统直接判定标的一致，不触发 iFinD 相关性查询。
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | call_option（看涨期权）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.08
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.72
-option_type（期权类型） | call_option（看涨期权）
-premium_rate（权利金率） | 5.0
-stress_loss（压力损失） | 200.0
-term_days（期限/天） | 180
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300指数
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-future_delta（期货Delta） | 1.0
-futures_margin（期货保证金） | 1080.0
-notional（名义本金） | 9000.0
-tool_type（工具类型） | futures（期货）
-underlying_code（标的代码） | 000300.SH
-underlying_name（标的名称） | 沪深300股指期货
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -580.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 117.50 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 2,000.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 1,770.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -3,080.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.4957% | -0.4450% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 140.9863% | -0.0782% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4881% | -0.0106% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2221.4996% | -7.6895% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 6.8085 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 0.3101 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 0.6667 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
-- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
-- 净资本变动 -3,080.00 万元，来源于期货/卖出期权保证金占用扣减。
-- 交易端衍生品对冲已按 LCR 口径计入自营资金流出（股指期货按名义价值 × 20% 计提资金流出）。
-
----
-
-## TC10：买入看跌期权 + 场内看涨期权对冲（iFinD Greeks 实时 Delta）
-
-**业务场景**：买入 50ETF 看跌期权（负 Delta 敞口），交易台买入 50ETF 场内看涨期权（正 Delta）对冲。系统优先通过 iFinD 获取场内期权实时 Delta 系数。
-
-**本用例触发的 iFinD 数据查询**：
-
-- `get_onsite_option_greeks(10011855, 'delta')`
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | put_option（看跌期权）
-direction（方向） | buy（买入 / 做多）
-expected_yield（预期年化收益率） | 0.05
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.5
-option_type（期权类型） | put_option（看跌期权）
-premium_rate（权利金率） | 3.0
-term_days（期限/天） | 90
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 上证50ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 8000.0
-option_delta（期权Delta） | 0.45
-option_premium（期权权利金） | 160.0
-option_type（期权类型） | call_option（看涨期权）
-tool_code（工具代码） | 10011855
-tool_type（工具类型） | onsite_option（场内期权）
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 50ETF 场内看涨期权
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | -460.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 23.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 0.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | -460.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | 0.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.8830% | -0.0577% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 141.0645% | +0.0000% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4988% | +0.0001% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2228.4965% | -0.6926% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 21.7391 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 1.0870 元/元 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 不适用 | 预期创收 / ΔRSF |
-| 预期年化创收 | 500.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 净资本变动为 0，本组合无额外保证金扣减。
-- 本用例依赖 iFinD 数据：
-  - `get_onsite_option_greeks(10011855, 'delta')`
-- 场内期权 Greeks：系统优先尝试 iFinD 实时 Delta；若查询失败或返回异常，自动回退到手动输入的 option_delta。
-
----
-
-## TC11：卖出看涨期权 + 场内期权对冲（iFinD Greeks 获取失败，回退到手动 Delta）
-
-**业务场景**：填写了无效场内期权合约编码，iFinD 无法返回有效 Greeks，系统回退到交易台手动输入的 option_delta 进行有效对冲判定。
-
-**本用例触发的 iFinD 数据查询**：
-
-- `get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback`
-
-### 模块 A：场内合约端输入
-
-字段 | 值
---- | ---
-contract_type（合约类型） | call_option（看涨期权）
-direction（方向） | short（卖出 / 做空）
-expected_yield（预期年化收益率） | 0.08
-notional（名义本金） | 10000.0
-option_delta（期权Delta） | -0.72
-option_type（期权类型） | call_option（看涨期权）
-premium_rate（权利金率） | 5.0
-stress_loss（压力损失） | 200.0
-term_days（期限/天） | 180
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 上证50ETF
-underlying_type（标的类型） | index_component（指数成分）
-
-### 模块 B：交易端（对冲工具）输入
-
-#### 对冲工具 #1
-
-字段 | 值
---- | ---
-direction（方向） | long（多头 / 买入）
-notional（名义本金） | 9000.0
-option_delta（期权Delta） | 0.8
-option_premium（期权权利金） | 180.0
-option_type（期权类型） | call_option（看涨期权）
-tool_code（工具代码） | INVALID_OPTION
-tool_type（工具类型） | onsite_option（场内期权）
-underlying_code（标的代码） | 510050.SH
-underlying_name（标的名称） | 50ETF 场内看涨期权（无效代码）
-
-### 模型输出
-
-#### 第一层：现金流与资源消耗绝对值
-
-| 输出项 | 数值 | 说明 |
-|---|---|---|
-| 首日净现金流 | 320.00 万元 | 合约端流入 - 交易端流出 |
-| 新增风险资本准备 | 59.00 万元 | 含市场风险 + 信用风险 |
-| 新增未来 30 日现金净流出 | 200.00 万元 | LCR 分母增量 |
-| 新增表内外资产总额 | 1,320.00 万元 | 杠杆率分母增量 |
-| 净资本变动 | -2,000.00 万元 | 保证金扣减 |
-
-#### 第二层：核心风控指标边际变动
-
-| 指标 | 原值 | 新值 | 变动 | 状态 | 监管红线 |
-|---|---|---|---|---|---|
-| LCR | 148.9407% | 148.9435% | +0.0028% | safe（安全） | ≥100% |
-| NSFR | 141.0645% | 141.0567% | -0.0078% | safe（安全） | ≥100% |
-| 资本杠杆率 | 5.4987% | 5.4918% | -0.0069% | danger（危险） | ≥8% |
-| 风险覆盖率 | 2229.1892% | 2224.7127% | -4.4765% | safe（安全） | ≥100% |
-
-#### 第三层：动态性价比指标
-
-| 指标 | 数值 | 说明 |
-|---|---|---|
-| ROC 资本收益率 | 13.5593 元/元 | 预期创收 / 新增风险资本准备 |
-| RO-LCR 流动性创收率 | 不适用 | 预期创收 / max(0, ΔOutflow - ΔHQLA) |
-| RO-NSFR 稳定资金创收率 | 6.6667 元/元 | 预期创收 / ΔRSF |
-| 预期年化创收 | 800.00 万元 | 名义本金 × 预期年化收益率 |
-
-#### 对冲有效性判定
-
-- 是否达成有效对冲：是
-
-### 关键判断与说明
-
-- 已达成监管有效对冲，市场风险资本准备按 **5%** 计提。
-- 卖出期权投资规模 S_short = max(5×200.0, 10000.0×0.5%) = 1000.00 万元。
-- LCR 表外流出增量 = S_short × 20% = 200.00 万元。
-- 净资本变动 -2,000.00 万元，来源于期货/卖出期权保证金占用扣减。
-- 本用例依赖 iFinD 数据：
-  - `get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback`
-- 场内期权 Greeks：系统优先尝试 iFinD 实时 Delta；若查询失败或返回异常，自动回退到手动输入的 option_delta。
-
----
-
-## 附录：公司基准参数（config.py）
-
-| 参数 | 数值（万元） |
-|---|---|
-| HQLA_base（优质流动性资产基数） | 1,188,100.00 |
-| LCR_COF_base（LCR现金流出基数） | 797,700.00 |
-| ASF_base（可用稳定资金基数） | 3,053,200.00 |
-| RSF_base（所需稳定资金基数） | 2,164,400.00 |
-| net_capital_base（净资本基数） | 1,649,600.00 |
-| total_risk_reserve_base（风险资本准备总额基数） | 74,000.00 |
-| on_off_balance_total_asset_base（表内外资产总额基数） | 30,000,000.00 |
-| classification_factor（分类评价系数 k_class） | 1.0 |
-| asf_rating_factor（ASF评级系数） | 0.0 |
+# 风控模型回归测试案例
+
+> 生成日期：2026-08-03；全程离线，不调用iFinD。
+
+## 公司基准与口径
+
+- 风险资本准备分类系数：1.0
+- 表内外资产分类系数：1.0
+- LCR毛流出/毛流入基数（元）：7,977,000,000 / 0
+- 场外卖出期权：风险资本/表内外资产用压力规模；LCR用名义×20%；NSFR用名义×12%。
+- 卖出场内期权：LCR和NSFR均以Delta金额×15%作为最终填列额，不再重复乘20%/12%。
+- 用于对冲权益互换的证券不计入HQLA；宽基ETF仍计入NSFR和市场风险资本准备。
+
+## TC01 卖出场外看涨期权（无对冲）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='call_option', direction='short', notional=10000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type='call_option', premium_rate=5.0, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=-0.5, option_margin_amount=None, option_margin_rate=None, stress_loss=200, margin_rate=None, margin_amount=None, equity_swap_delta=None, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.08, expiry_date=None, begin_date=None, term_days=180)`
+- 对冲端：`[]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | 500.000000 |
+| `new_risk_reserve` | 300.000000 |
+| `market_credit_risk_reserve` | 300.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | 500.000000 |
+| `gross_outflow_change` | 2,000.000000 |
+| `net_cof_change` | 2,000.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 1,200.000000 |
+| `assets_change` | 1,500.000000 |
+| `net_capital_change` | 0.000000 |
+| `equity_scale_change` | 1000 |
+| `lcr_new` | 1.486307 |
+| `nsfr_new` | 1.409863 |
+| `leverage_new` | 0.054984 |
+| `risk_coverage_new` | 22.201884 |
+| `equity_scale_ratio_new` | 0.000606 |
+| `expected_income` | 800.000000 |
+| `roc` | 2.666667 |
+| `ro_lcr` | 0.533333 |
+| `ro_nsfr` | 0.666667 |
+
+- 监管有效对冲：`[False, '未填写对冲工具标的代码，不满足有效对冲条件']`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC02 卖出场外看涨期权（宽基ETF有效对冲）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='call_option', direction='short', notional=10000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type='call_option', premium_rate=5.0, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=-0.5, option_margin_amount=None, option_margin_rate=None, stress_loss=200, margin_rate=None, margin_amount=None, equity_swap_delta=None, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.08, expiry_date=None, begin_date=None, term_days=180)`
+- 对冲端：`[HedgeTrade(tool_type='etf', direction='long', notional=5000, tool_code=None, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', cash_spent=None, is_broad_based_etf=True, stock_type=None, futures_margin=None, futures_margin_rate=None, future_type=None, future_delta=None, option_premium=None, option_type=None, option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=None, option_margin=None, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=None, fund_structure=None, fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | -4,500.000000 |
+| `new_risk_reserve` | 300.000000 |
+| `market_credit_risk_reserve` | 300.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | -2,000.000000 |
+| `gross_outflow_change` | 2,000.000000 |
+| `net_cof_change` | 2,000.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 1,700.000000 |
+| `assets_change` | 1,500.000000 |
+| `net_capital_change` | 0.000000 |
+| `equity_scale_change` | 6000 |
+| `lcr_new` | 1.483181 |
+| `nsfr_new` | 1.409538 |
+| `leverage_new` | 0.054984 |
+| `risk_coverage_new` | 22.201884 |
+| `equity_scale_ratio_new` | 0.003637 |
+| `expected_income` | 800.000000 |
+| `roc` | 2.666667 |
+| `ro_lcr` | 0.200000 |
+| `ro_nsfr` | 0.470588 |
+
+- 监管有效对冲：`[True, None]`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC03 境内个股收益互换（非全额保证金、期货对冲未认定有效）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='equity_swap', direction='short', notional=20000, underlying_type='general_stock', underlying_name=None, underlying_code='600519.SH', underlying_market='CN', underlying_instrument='stock', option_type=None, premium_rate=None, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=None, option_margin_amount=None, option_margin_rate=None, stress_loss=None, margin_rate=10.0, margin_amount=None, equity_swap_delta=-1.0, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.06, expiry_date=None, begin_date=None, term_days=365)`
+- 对冲端：`[HedgeTrade(tool_type='futures', direction='long', notional=18000, tool_code=None, underlying_type='index_component', underlying_name=None, underlying_code='', underlying_market='CN', cash_spent=None, is_broad_based_etf=False, stock_type=None, futures_margin=2160, futures_margin_rate=None, future_type=None, future_delta=1.0, option_premium=None, option_type=None, option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=None, option_margin=None, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=None, fund_structure=None, fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | -160.000000 |
+| `new_risk_reserve` | 3,010.000000 |
+| `market_credit_risk_reserve` | 3,010.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | -160.000000 |
+| `gross_outflow_change` | 3,640.000000 |
+| `net_cof_change` | 3,640.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 2,360.000000 |
+| `assets_change` | 8,700.000000 |
+| `net_capital_change` | -2,160.000000 |
+| `equity_scale_change` | 4,700.000000 |
+| `lcr_new` | 1.482442 |
+| `nsfr_new` | 1.409109 |
+| `leverage_new` | 0.054899 |
+| `risk_coverage_new` | 21.392546 |
+| `equity_scale_ratio_new` | 0.002853 |
+| `expected_income` | 1,200.000000 |
+| `roc` | 0.398671 |
+| `ro_lcr` | 0.315789 |
+| `ro_nsfr` | 0.508475 |
+
+- 监管有效对冲：`[False, '对冲工具#1未填写标的代码，不满足有效对冲条件']`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC04 指数收益互换（宽基ETF同标的有效对冲）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='equity_swap', direction='long', notional=10000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type=None, premium_rate=None, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=None, option_margin_amount=None, option_margin_rate=None, stress_loss=None, margin_rate=10.0, margin_amount=None, equity_swap_delta=1.0, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.06, expiry_date=None, begin_date=None, term_days=365)`
+- 对冲端：`[HedgeTrade(tool_type='etf', direction='short', notional=10000, tool_code=None, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', cash_spent=None, is_broad_based_etf=True, stock_type=None, futures_margin=None, futures_margin_rate=None, future_type=None, future_delta=None, option_premium=None, option_type=None, option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=None, option_margin=None, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=None, fund_structure=None, fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | 11,000.000000 |
+| `new_risk_reserve` | 1,050.000000 |
+| `market_credit_risk_reserve` | 1,050.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | 11,000.000000 |
+| `gross_outflow_change` | 20.000000 |
+| `net_cof_change` | 20.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 1,100.000000 |
+| `assets_change` | 12,000.000000 |
+| `net_capital_change` | 0.000000 |
+| `equity_scale_change` | 11,000.000000 |
+| `lcr_new` | 1.503159 |
+| `nsfr_new` | 1.409928 |
+| `leverage_new` | 0.054965 |
+| `risk_coverage_new` | 21.980013 |
+| `equity_scale_ratio_new` | 0.006668 |
+| `expected_income` | 600.000000 |
+| `roc` | 0.571429 |
+| `ro_lcr` | 不适用 |
+| `ro_nsfr` | 0.545455 |
+
+- 监管有效对冲：`[True, None]`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC05 固定收益凭证（无内嵌衍生品）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='income_certificate', direction='issue', notional=50000, underlying_type='index_component', underlying_name=None, underlying_code=None, underlying_market='CN', underlying_instrument=None, option_type=None, premium_rate=None, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=None, option_margin_amount=None, option_margin_rate=None, stress_loss=None, margin_rate=None, margin_amount=None, equity_swap_delta=None, funds_raised=50000, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.04, expiry_date=None, begin_date=None, term_days=400)`
+- 对冲端：`[]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | 50000 |
+| `new_risk_reserve` | 0.000000 |
+| `market_credit_risk_reserve` | 0.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | 50,000.000000 |
+| `gross_outflow_change` | 0.000000 |
+| `net_cof_change` | 0.000000 |
+| `asf_change` | 50000 |
+| `rsf_change` | 0.000000 |
+| `assets_change` | 50,000.000000 |
+| `net_capital_change` | 0.000000 |
+| `equity_scale_change` | 0.000000 |
+| `lcr_new` | 1.552087 |
+| `nsfr_new` | 1.433746 |
+| `leverage_new` | 0.054895 |
+| `risk_coverage_new` | 22.291892 |
+| `equity_scale_ratio_new` | 0.000000 |
+| `expected_income` | 2,000.000000 |
+| `roc` | 不适用 |
+| `ro_lcr` | 不适用 |
+| `ro_nsfr` | 不适用 |
+
+- 监管有效对冲：`[False, '未填写场外合约标的代码，不满足有效对冲条件']`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC06 浮动收益凭证（内嵌期权+期货有效对冲）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='income_certificate', direction='issue', notional=50000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type=None, premium_rate=None, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=-0.5, option_margin_amount=None, option_margin_rate=None, stress_loss=300, margin_rate=None, margin_amount=None, equity_swap_delta=None, funds_raised=50000, income_certificate_delta=None, has_embedded_option=True, embedded_option_notional=50000, margin_liability_term_days=None, expected_yield=0.05, expiry_date=None, begin_date=None, term_days=270)`
+- 对冲端：`[HedgeTrade(tool_type='futures', direction='long', notional=25000, tool_code=None, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', cash_spent=None, is_broad_based_etf=False, stock_type=None, futures_margin=3000, futures_margin_rate=None, future_type=None, future_delta=1.0, option_premium=None, option_type=None, option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=None, option_margin=None, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=None, fund_structure=None, fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | 47000 |
+| `new_risk_reserve` | 262.500000 |
+| `market_credit_risk_reserve` | 262.500000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | 47,000.000000 |
+| `gross_outflow_change` | 15,000.000000 |
+| `net_cof_change` | 15,000.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 9,000.000000 |
+| `assets_change` | 55,250.000000 |
+| `net_capital_change` | -3,000.000000 |
+| `equity_scale_change` | 5,250.000000 |
+| `lcr_new` | 1.519749 |
+| `nsfr_new` | 1.404804 |
+| `leverage_new` | 0.054786 |
+| `risk_coverage_new` | 22.172698 |
+| `equity_scale_ratio_new` | 0.003188 |
+| `expected_income` | 2,500.000000 |
+| `roc` | 9.523810 |
+| `ro_lcr` | 不适用 |
+| `ro_nsfr` | 0.277778 |
+
+- 监管有效对冲：`[True, None]`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC07 场外期权+卖出场内期权（验证15%不重复折算）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='call_option', direction='buy', notional=1000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type='call_option', premium_rate=None, total_premium_amount=30, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=0.5, option_margin_amount=None, option_margin_rate=None, stress_loss=None, margin_rate=None, margin_amount=None, equity_swap_delta=None, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.08, expiry_date=None, begin_date=None, term_days=90)`
+- 对冲端：`[HedgeTrade(tool_type='onsite_option', direction='short', notional=1000, tool_code=None, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', cash_spent=None, is_broad_based_etf=False, stock_type=None, futures_margin=None, futures_margin_rate=None, future_type=None, future_delta=None, option_premium=20, option_type='call_option', option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=-0.5, option_margin=150, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=None, fund_structure=None, fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | -10 |
+| `new_risk_reserve` | 5.250000 |
+| `market_credit_risk_reserve` | 5.250000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | -10.000000 |
+| `gross_outflow_change` | 75.000000 |
+| `net_cof_change` | 75.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 75.000000 |
+| `assets_change` | 95.000000 |
+| `net_capital_change` | -150.000000 |
+| `equity_scale_change` | 105.000000 |
+| `lcr_new` | 1.489254 |
+| `nsfr_new` | 1.410596 |
+| `leverage_new` | 0.054981 |
+| `risk_coverage_new` | 22.288284 |
+| `equity_scale_ratio_new` | 0.000064 |
+| `expected_income` | 80.000000 |
+| `roc` | 15.238095 |
+| `ro_lcr` | 0.941176 |
+| `ro_nsfr` | 1.066667 |
+
+- 监管有效对冲：`[True, None]`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`
+
+## TC08 收益互换+一对一SPV申购（未提供组合Delta）
+
+### 输入
+
+- 客户端：`OtcContract(contract_type='equity_swap', direction='short', notional=20000, underlying_type='index_component', underlying_name=None, underlying_code='000300.SH', underlying_market='CN', underlying_instrument='index', option_type=None, premium_rate=None, total_premium_amount=None, single_premium_amount=None, contract_multiplier=None, contract_size=None, exercise_price=None, option_delta=None, option_margin_amount=None, option_margin_rate=None, stress_loss=None, margin_rate=25.0, margin_amount=None, equity_swap_delta=-1.0, funds_raised=None, income_certificate_delta=None, has_embedded_option=False, embedded_option_notional=None, margin_liability_term_days=None, expected_yield=0.06, expiry_date=None, begin_date=None, term_days=365)`
+- 对冲端：`[HedgeTrade(tool_type='private_fund', direction='long', notional=14000, tool_code=None, underlying_type=None, underlying_name=None, underlying_code='000300.SH', underlying_market='CN', cash_spent=None, is_broad_based_etf=False, stock_type=None, futures_margin=None, futures_margin_rate=None, future_type=None, future_delta=None, option_premium=None, option_type=None, option_strike_price=None, option_start_date=None, option_expiry_date=None, option_delta=None, option_margin=None, option_margin_rate=None, otc_payment=None, pass_through_fee=None, otc_hedge_contract_type=None, otc_stress_loss=None, subscription_amount=14000, fund_structure='single_product', fund_lookthrough_risk_rate=None, asset_maturity_days=None, fund_delta=None)]`
+
+### 输出
+
+| 指标 | 结果 |
+|---|---:|
+| `net_day1_cash` | -9,000.000000 |
+| `new_risk_reserve` | 8,600.000000 |
+| `market_credit_risk_reserve` | 8,600.000000 |
+| `operational_risk_reserve` | 0.000000 |
+| `hqla_change` | -9,000.000000 |
+| `gross_outflow_change` | 40.000000 |
+| `net_cof_change` | 40.000000 |
+| `asf_change` | 0.000000 |
+| `rsf_change` | 14,200.000000 |
+| `assets_change` | 7,000.000000 |
+| `net_capital_change` | 0.000000 |
+| `equity_scale_change` | 2,000.000000 |
+| `lcr_new` | 1.478050 |
+| `nsfr_new` | 1.401450 |
+| `leverage_new` | 0.054974 |
+| `risk_coverage_new` | 19.970944 |
+| `equity_scale_ratio_new` | 0.001212 |
+| `expected_income` | 1,200.000000 |
+| `roc` | 0.139535 |
+| `ro_lcr` | 0.132743 |
+| `ro_nsfr` | 0.084507 |
+
+- 监管有效对冲：`[False, 'Delta 敞口数据缺失，不满足有效对冲条件']`
+- 公司业务范围：`{'is_compliant': True, 'errors': [], 'warnings': []}`

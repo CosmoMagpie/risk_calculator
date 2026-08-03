@@ -39,6 +39,7 @@ class HedgeTrade:
 
     # ===== ETF现货字段 =====
     cash_spent: Optional[float] = None     # ETF买入实际花费现金（万元），未指定时默认=名义金额
+    is_broad_based_etf: bool = False       # 是否为交易所认定的宽基股票指数类ETF
 
     # ===== 股票现货字段 =====
     stock_type: Optional[str] = None       # 股票类型：index_component | general_stock | restricted_stock | other_stock
@@ -64,9 +65,15 @@ class HedgeTrade:
     #           来转移风险，这称为"背对背平盘"（back-to-back hedging）
     otc_payment: Optional[float] = None         # 向平盘方支付的预付金/保证金（万元）
     pass_through_fee: Optional[float] = None    # 平盘成本（年化%），即支付给平盘方的费率
+    otc_hedge_contract_type: Optional[str] = None  # equity_swap / option
+    otc_stress_loss: Optional[float] = None        # 卖出场外期权平盘的±20%压力最大损失
 
     # ===== 私募基金字段 =====
     subscription_amount: Optional[float] = None # 私募基金申购金额（万元）
+    fund_structure: Optional[str] = None         # collective_product / single_product
+    fund_lookthrough_risk_rate: Optional[float] = None  # 可穿透底层市场风险比例（小数）
+    asset_maturity_days: Optional[int] = None    # 作为“其他资产”计入NSFR时的剩余期限
+    fund_delta: Optional[float] = None            # 经核验的基金组合Delta；不提供则不能认定有效对冲
 
     # ================================================================
     # getter 方法与核心业务逻辑
@@ -85,7 +92,7 @@ class HedgeTrade:
           ETF/股票：做多=全款买入(流出)，做空=融券卖出(流入)
           期货：只占用保证金（双向都流出），不分多空
           场内期权：买入付权利金(流出)，卖出收权利金(流入)
-          场外背对背：预付金 + 年化平盘成本按期限折算
+          场外背对背：首日仅计预付金；年化平盘成本进入创收净额，不混入首日现金流
           私募基金：申购金额直接流出
         """
         # --- ETF：做多全款买入，做空获得现金 ---
@@ -115,11 +122,7 @@ class HedgeTrade:
 
         # --- 场外背对背对冲：预付金 + 平盘成本 ---
         elif self.tool_type == "otc_hedge":
-            total = self.otc_payment if self.otc_payment is not None else 0.0
-            if self.pass_through_fee is not None:
-                # 平盘成本 = 名义本金 × 平盘成本率 × (期限/365)，默认90天
-                total += self.notional * self.pass_through_fee / 100 * (90 / 365)
-            return total
+            return self.otc_payment if self.otc_payment is not None else 0.0
 
         # --- 私募基金：申购金额流出 ---
         elif self.tool_type == "private_fund":
@@ -192,14 +195,16 @@ class HedgeTrade:
         # 当前未提供时，保守按互换 100% Delta 近似。
         elif self.tool_type == "otc_hedge":
             if self.option_delta is not None:
-                is_call = 1 if self.option_type == "call_option" else -1
-                return self.option_delta * self.notional * is_call * (1 if self.direction == "long" else -1)
+                # option_delta统一定义为带头寸方向的Delta，避免重复乘方向和call/put符号。
+                return self.option_delta * self.notional
             return self.notional if self.direction == "long" else -self.notional
 
         # --- 私募基金：默认按满仓权益近似，Delta = 申购金额 × 方向 ---
         # 后续可新增 fund_beta / fund_delta 字段提高精度
         elif self.tool_type == "private_fund":
+            if self.fund_delta is None:
+                return None
             amount = self.subscription_amount if self.subscription_amount is not None else self.notional
-            return amount if self.direction == "long" else -amount
+            return self.fund_delta * amount
 
         return None

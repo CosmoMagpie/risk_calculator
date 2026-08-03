@@ -128,6 +128,18 @@ def get_ifind_login_status() -> dict:
 
 _A_SHARE_SUFFIXES = (".SH", ".SZ", ".BJ")
 
+# 裸六位代码存在交易所歧义（例如 000001 同时可指上证综指和深市股票）。
+# 这里只对模型常用且无业务歧义的中证/上证指数代码做显式映射；其余
+# 000/300 开头代码仍按深市证券处理，避免把个股误识别成指数。
+_KNOWN_SH_INDEX_CODES = {
+    "000016",  # 上证50
+    "000300",  # 沪深300
+    "000852",  # 中证1000
+    "000905",  # 中证500
+    "000906",  # 中证800
+    "000985",  # 中证全指
+}
+
 
 def normalize_a_share_code(code: str) -> str:
     """
@@ -155,6 +167,8 @@ def normalize_a_share_code(code: str) -> str:
     if code.endswith(_A_SHARE_SUFFIXES):
         return code
     if len(code) == 6 and code.isdigit():
+        if code in _KNOWN_SH_INDEX_CODES:
+            return code + ".SH"
         if code.startswith(("0", "3", "68", "69")):
             return code + ".SZ"
         if code.startswith(("6", "9")):

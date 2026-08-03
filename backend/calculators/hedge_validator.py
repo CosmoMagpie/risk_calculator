@@ -89,24 +89,24 @@ def is_effective_hedge(
     if otc_code is None or str(otc_code).strip() == "":
         return [False, "未填写场外合约标的代码，不满足有效对冲条件"]
 
-    hedge_codes = [
-        normalize_a_share_code(h.get_tool_underlying_code())
-        for h in hedge_list
-        if h.get_tool_underlying_code() is not None and str(h.get_tool_underlying_code()).strip() != ""
-    ]
-    if not hedge_codes:
+    if not hedge_list:
         return [False, "未填写对冲工具标的代码，不满足有效对冲条件"]
+    hedge_codes = []
+    for index, hedge in enumerate(hedge_list, 1):
+        raw_code = hedge.get_tool_underlying_code()
+        if raw_code is None or str(raw_code).strip() == "":
+            return [False, f"对冲工具#{index}未填写标的代码，不满足有效对冲条件"]
+        hedge_codes.append(normalize_a_share_code(raw_code))
 
-    # 子条件1.1：任一工具的标的代码与场外合约相同 → 标的一致
-    underlying_is_same = any(otc_code == hc for hc in hedge_codes)
-
-    # 子条件1.2：标的不同时，检查过去一年价格相关性 ≥ 95%
-    if not underlying_is_same:
+    # 每一项对冲工具都必须逐项满足“同标的或相关系数≥95%”。旧实现只要任一
+    # 工具同标的便跳过整个组合的相关性检查，会把混入的不相关工具误判为有效。
+    different_codes = [hc for hc in hedge_codes if hc != otc_code]
+    if different_codes:
         otc_price = get_underlying_price_series(otc_code, price_type)
         if not otc_price.get(otc_code, []):
             return [False, f"获取产品标的 {otc_code} 价格数据失败"]
 
-        for hc in hedge_codes:
+        for hc in different_codes:
             h_price = get_underlying_price_series(hc, price_type)
             if not h_price.get(hc, []):
                 return [False, f"获取对冲工具标的 {hc} 价格数据失败"]
@@ -115,7 +115,8 @@ def is_effective_hedge(
                 otc_code, otc_price, hc, h_price
             )
             if np.isnan(corr) or corr < 0.95:
-                return [False, f"标的 {otc_code} 与 {hc} 相关性 {corr:.2%}，未达 95%"]
+                corr_text = "无法计算" if np.isnan(corr) else f"{corr:.2%}"
+                return [False, f"标的 {otc_code} 与 {hc} 相关性 {corr_text}，未达 95%"]
 
     # ====== 条件3：多头 Delta |绝对值| : 空头 Delta |绝对值| ∈ [80%, 125%] ======
     deltas = _collect_deltas(otc, hedge_list)
@@ -129,8 +130,8 @@ def is_effective_hedge(
     if long_delta_sum == 0 or short_delta_sum == 0:
         return [False, "多头 Delta 或空头 Delta 为零，不满足有效对冲条件"]
 
-    ratio = min(long_delta_sum, short_delta_sum) / max(long_delta_sum, short_delta_sum)
-    if ratio < 0.80:
+    ratio = long_delta_sum / short_delta_sum
+    if ratio < 0.80 or ratio > 1.25:
         return [False, f"多头/空头 Delta 比例 {ratio:.1%}，不在 80%-125% 之间"]
 
     return [True, None]

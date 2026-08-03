@@ -41,7 +41,8 @@ def test_config():
     c = DEFAULT_CONFIG["client"]
     check("swap_margin_rate ∈ (0,1]", 0 < c["swap_margin_rate"] <= 1)
     check("option_premium_rate > 0", c["option_premium_rate"] > 0)
-    check("option_margin_rate > 0", c["option_margin_rate"] > 0)
+    check("OTC option margin is not hardcoded as exchange margin",
+          "option_margin_rate" not in c)
 
     # trade defaults
     t = DEFAULT_CONFIG["trade"]
@@ -57,6 +58,8 @@ def test_config():
                 "classification_factor", "asf_rating_factor"]:
         check(f"firm['{key}'] exists and >= 0", key in f and f[key] >= 0)
     check("asf_rating_factor ∈ [0, 0.2]", 0 <= f["asf_rating_factor"] <= 0.20)
+    check("asset_adjustment_factor is valid", f["asset_adjustment_factor"] in (0.7, 0.9, 1.0))
+    check("LCR gross bases exist", "LCR_outflow_base" in f and "LCR_inflow_base" in f)
 
 
 # ============================================================
@@ -96,13 +99,13 @@ def test_client_contract():
     check("swap short: cash inflow = 10% × 2000 = 200",
           math.isclose(swap.get_otc_cash_inflow(), 200.0))
 
-    # ---- 收益互换（多头，付保证金）----
+    # ---- 收益互换（多头，也按字段定义收取客户保证金）----
     swap_long = ClientContract(
         contract_type="equity_swap", direction="long", notional=1000,
         underlying_type="index_component", margin_amount=150
     )
-    check("swap long: cash inflow = -margin_amount (-150)",
-          math.isclose(swap_long.get_otc_cash_inflow(), -150.0))
+    check("swap long: received margin is +150",
+          math.isclose(swap_long.get_otc_cash_inflow(), 150.0))
 
     # ---- 收益凭证（固定）----
     cert = ClientContract(
@@ -119,7 +122,8 @@ def test_client_contract():
     cert_float = ClientContract(
         contract_type="income_certificate", direction="buy", notional=800,
         underlying_type="index_component",
-        funds_raised=800, stress_loss=60, term_days=270
+        funds_raised=800, has_embedded_option=True,
+        embedded_option_notional=800, stress_loss=60, term_days=270
     )
     check("floating cert: stress_loss=60 → 浮动型",
           cert_float.stress_loss is not None)
@@ -226,8 +230,8 @@ def test_hedge_trade():
     otc_h = HedgeTrade(tool_type="otc_hedge", direction="long",
                        notional=400, otc_payment=50, pass_through_fee=2.0)
     outflow = otc_h.get_trade_cash_outflow()
-    # 50 + 400 × 2% × (90/365) ≈ 50 + 1.97 = 51.97
-    check("otc hedge: outflow = otc_payment + fee > 50", outflow > 50)
+    # 年化平盘成本属于创收扣减，不混入首日现金流。
+    check("otc hedge: day-one outflow equals otc_payment", math.isclose(outflow, 50.0))
 
     # ---- Private fund ----
     pf = HedgeTrade(tool_type="private_fund", direction="long",
@@ -244,7 +248,7 @@ def test_hedge_trade():
     check("get_tool_underlying_code returns None when not set",
           etf.get_tool_underlying_code() is None)
 
-    # ---- otc_hedge / private_fund Delta 不再返回 None ----
+    # ---- otc_hedge / private_fund Delta ----
     otc_h_delta = HedgeTrade(tool_type="otc_hedge", direction="long",
                              notional=400, underlying_code="000300").get_hedge_delta_amount()
     check("otc_hedge delta = +notional", math.isclose(otc_h_delta, 400.0))
@@ -253,9 +257,13 @@ def test_hedge_trade():
                                    notional=400).get_hedge_delta_amount()
     check("otc_hedge short delta = -notional", math.isclose(otc_h_short_delta, -400.0))
 
+    pf_delta_missing = HedgeTrade(tool_type="private_fund", direction="long",
+                                  notional=100, subscription_amount=80).get_hedge_delta_amount()
+    check("private_fund without verified delta cannot be effective hedge", pf_delta_missing is None)
     pf_delta = HedgeTrade(tool_type="private_fund", direction="long",
-                          notional=100, subscription_amount=80).get_hedge_delta_amount()
-    check("private_fund delta = subscription_amount", math.isclose(pf_delta, 80.0))
+                          notional=100, subscription_amount=80,
+                          fund_delta=1.0).get_hedge_delta_amount()
+    check("private_fund verified delta = 80", math.isclose(pf_delta, 80.0))
 
 
 # ============================================================
@@ -317,25 +325,25 @@ def test_analyzer_e2e():
         funds_raised=500, term_days=90
     )
     etf_hedge = HedgeTrade(tool_type="etf", direction="long", notional=400,
-                           underlying_type="index_component")
+                           underlying_type="index_component", is_broad_based_etf=True)
     r3 = analyze_contract(cert, [etf_hedge])
-    check("e2e fixed cert: new_risk_reserve = 0 (固定型不计提)",
-          math.isclose(r3["new_risk_reserve"], 0.0))
+    check("e2e fixed cert: host=0 but standalone ETF reserve=20",
+          math.isclose(r3["new_risk_reserve"], 20.0))
     # 募集500 - 买ETF 400 = 净现金 +100
     check("e2e fixed cert: net_day1_cash = 100",
           math.isclose(r3["net_day1_cash"], 100.0))
     # 收益凭证表内增量 = V 本身（募集资金全额入表，对冲只改变资产形态）
     check("e2e fixed cert: assets_change = V = 500",
           math.isclose(r3["assets_change"], 500.0))
-    # roc sentinel：分母为0 → 999
-    check("e2e fixed cert: roc = 999 (division by zero sentinel)",
-          math.isclose(r3["roc"], 999.0))
+    check("e2e fixed cert: roc uses standalone ETF reserve",
+          math.isclose(r3["roc"], 2.0))
 
     # ---- 场景4：浮动收益凭证 + 期货对冲 ----
     cert_f = ClientContract(
         contract_type="income_certificate", direction="buy", notional=800,
         underlying_type="index_component",
-        funds_raised=800, stress_loss=60, term_days=270
+        funds_raised=800, has_embedded_option=True,
+        embedded_option_notional=800, stress_loss=60, term_days=270
     )
     fut_h = HedgeTrade(tool_type="futures", direction="short", notional=600,
                        underlying_type="index_component", futures_margin=72)
@@ -352,8 +360,8 @@ def test_analyzer_e2e():
     r5 = analyze_contract(buy_otc, [])
     check("e2e buy option: net_day1_cash = -30",
           math.isclose(r5["net_day1_cash"], -30.0))
-    check("e2e buy option: assets_change = -30 (only on-balance, no off-balance)",
-          math.isclose(r5["assets_change"], -30.0))
+    check("e2e buy option: premium payment only changes asset form",
+          math.isclose(r5["assets_change"], 0.0))
 
     # ---- 场景6：空对冲列表不报错 ----
     r6 = analyze_contract(swap, [])
@@ -377,7 +385,7 @@ def test_analyzer_e2e():
     check("e2e is_effective_hedge: [0] is bool, [1] is str or None",
           isinstance(ie[0], bool) and (isinstance(ie[1], str) or ie[1] is None))
 
-    # ---- 场景9：RO-LCR 分母为0(流动性改善) → sentinel 999 ----
+    # ---- 场景9：RO-LCR 分母为0(流动性改善) → 不适用 ----
     # 固定收益凭证 T>30天 + 无对冲：募集资金V全部变成HQLA，无COF流出
     # → ΔHQLA = +V, ΔOutflow = 0 → net_liquidity_drain = 0 - V < 0 → max(0, ...) = 0
     cert_long = ClientContract(
@@ -386,14 +394,15 @@ def test_analyzer_e2e():
         funds_raised=500, term_days=90  # >30天
     )
     r_liq = analyze_contract(cert_long, [])
-    check("e2e liquidity improvement: ro_lcr = 999 (sentinel)",
-          math.isclose(r_liq["ro_lcr"], 999.0))
+    check("e2e liquidity improvement: ro_lcr is None",
+          r_liq["ro_lcr"] is None)
 
     # ---- 场景10：浮动收益凭证 Delta 非零，可参与有效对冲判定 ----
     cert_float = ClientContract(
         contract_type="income_certificate", direction="buy", notional=800,
         underlying_type="index_component", underlying_code="000300",
-        funds_raised=800, stress_loss=60, term_days=270
+        funds_raised=800, has_embedded_option=True,
+        embedded_option_notional=800, stress_loss=60, term_days=270
     )
     check("floating cert delta < 0 (short embedded option)",
           cert_float.get_otc_delta_amount() < 0)
@@ -550,6 +559,34 @@ def test_new_fields_and_helpers():
     check("stress loss estimator returns 200", math.isclose(loss, 200.0))
 
 
+def test_company_business_constraints():
+    print("\n=== 公司业务范围约束 ===")
+    otc = ClientContract(
+        contract_type="equity_swap", direction="short", notional=1000,
+        underlying_type="general_stock", underlying_instrument="stock",
+        underlying_market="CN", underlying_code="600000", margin_rate=10.0,
+    )
+    stock = HedgeTrade(
+        tool_type="stock", direction="long", notional=500,
+        underlying_type="general_stock", underlying_market="CN",
+        underlying_code="600000",
+    )
+    result = analyze_contract(otc, [stock])
+    check("individual-stock physical hedge is rejected",
+          not result["business_constraints"]["is_compliant"])
+    check("noncompliant hedge cannot be regulatory effective",
+          result["is_effective_hedge"][0] is False)
+
+    overseas = ClientContract(
+        contract_type="call_option", direction="short", notional=1000,
+        underlying_type="general_stock", underlying_market="HK",
+        option_type="call_option", premium_rate=5.0, stress_loss=50,
+    )
+    overseas_result = analyze_contract(overseas, [])
+    check("overseas underlying is rejected without overseas credential",
+          not overseas_result["business_constraints"]["is_compliant"])
+
+
 # ============================================================
 # 运行
 # ============================================================
@@ -565,6 +602,7 @@ if __name__ == "__main__":
     test_math_consistency()
     test_all_getters_no_error()
     test_new_fields_and_helpers()
+    test_company_business_constraints()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

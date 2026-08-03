@@ -86,8 +86,9 @@ def _get_client_investment_scale(otc: OtcContract) -> float:
         return otc.notional * 0.10
 
     elif ct == "income_certificate":
-        if otc.stress_loss is not None:
-            return _get_short_investment_scale(otc.notional, otc.stress_loss)
+        if otc.has_embedded_option:
+            embedded_notional = otc.embedded_option_notional or otc.notional
+            return _get_short_investment_scale(embedded_notional, otc.stress_loss or 0.0)
         return 0.0
 
     return 0.0
@@ -111,12 +112,18 @@ def _get_hedge_investment_scale(hedge: HedgeTrade, client_ct: str = "equity_swap
     elif hedge.tool_type == "futures":
         return hedge.notional * 0.15
     elif hedge.tool_type == "otc_hedge":
-        if client_ct in ("call_option", "put_option", "income_certificate"):
-            return hedge.notional * 0.005
+        if hedge.otc_hedge_contract_type == "option":
+            if hedge.direction == "short":
+                return _get_short_investment_scale(
+                    hedge.notional, hedge.otc_stress_loss or 0.0
+                )
+            return abs(hedge.otc_payment or 0.0)
         return hedge.notional * 0.10
     elif hedge.tool_type == "onsite_option":
+        if hedge.direction == "short":
+            return abs(hedge.option_delta or 0.0) * hedge.notional * 0.15
         if hedge.option_premium is not None:
-            return hedge.option_premium
+            return abs(hedge.option_premium)
         return hedge.notional * DEFAULT_CONFIG["trade"]["onsite_option_premium_rate"]
     elif hedge.tool_type == "private_fund":
         return hedge.subscription_amount or 0.0
@@ -136,7 +143,12 @@ def _is_non_full_margin_swap(otc: OtcContract) -> bool:
 
 def _is_individual_stock(otc: OtcContract) -> bool:
     """条件B：标的是否为境内个股（非指数成分股）"""
-    return otc.underlying_type not in ("index_component",)
+    market = (otc.underlying_market or "CN").upper()
+    if market not in ("CN", "CHINA", "A_SHARE"):
+        return False
+    if otc.underlying_instrument is not None:
+        return otc.underlying_instrument == "stock"
+    return otc.underlying_type not in ("index_component", "broad_based_etf", "index")
 
 
 def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equity_swap") -> float:
@@ -144,7 +156,8 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equi
     未达成有效对冲时，单独计算各对冲工具自身的市场风险资本准备（万元，不含 k_class）
 
     监管逻辑：对冲端头寸若不满足有效对冲条件，应作为独立自营头寸按其对应类别计提。
-      - ETF/股票现货：按标的属性分别适用 8% / 25% / 50% / 80%
+      - 股票现货：按股票属性适用8%/25%/50%/80%（公司政策不允许其作为对冲）
+      - ETF：作为权益类基金，指数基金5%，其他权益类基金10%
       - 股指期货：投资规模 = 名义价值 × 15%，市场风险准备 = 投资规模 × 30%
       - 卖出场内期权：投资规模 = Delta金额 × 15%，市场风险准备 = 投资规模 × 30%
       - 买入场内期权：投资规模 = 权利金，市场风险准备 = 权利金 × 100%
@@ -155,9 +168,13 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equi
     for h in hedge_list:
         tt = h.tool_type
 
-        if tt in ("etf", "stock"):
+        if tt == "stock":
             st = h.underlying_type or h.stock_type or "general_stock"
             rate = RATES.get(st, 0.25)
+            total += h.notional * rate
+
+        elif tt == "etf":
+            rate = RATES["equity_index_fund"] if h.is_broad_based_etf else RATES["other_equity_fund"]
             total += h.notional * rate
 
         elif tt == "futures":
@@ -170,17 +187,28 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equi
                 total += s_short * RATES["equity_short_option"]
             else:
                 premium = h.option_premium if h.option_premium is not None else h.notional * DEFAULT_CONFIG["trade"]["onsite_option_premium_rate"]
-                total += premium * RATES["equtity_long_option"]
+                total += premium * RATES["equity_long_option"]
 
         elif tt == "otc_hedge":
-            # 背对背平盘口径与 leverage.py 保持一致：期权类 N×0.5%，互换类 N×10%
-            scale = h.notional * (0.005 if client_ct in ("call_option", "put_option", "income_certificate") else 0.10)
-            total += scale * RATES["equity_swap"]
+            if h.otc_hedge_contract_type == "option":
+                if h.direction == "short":
+                    scale = _get_short_investment_scale(
+                        h.notional, h.otc_stress_loss or 0.0
+                    )
+                    total += scale * RATES["equity_short_option"]
+                else:
+                    total += abs(h.otc_payment or 0.0) * RATES["equity_long_option"]
+            else:
+                total += h.notional * 0.10 * RATES["equity_swap"]
 
         elif tt == "private_fund":
-            # 私募基金归入集合及信托等产品，附件2标准为 25%
+            # 一对多归入集合及信托等产品25%；一对一归入单一产品50%，
+            # 可穿透时对单一产品执行“单一或穿透孰严”。
             amount = h.subscription_amount if h.subscription_amount is not None else 0.0
-            total += amount * 0.25
+            base_rate = 0.25 if h.fund_structure == "collective_product" else 0.50
+            if h.fund_structure == "single_product" and h.fund_lookthrough_risk_rate is not None:
+                base_rate = max(base_rate, h.fund_lookthrough_risk_rate)
+            total += amount * base_rate
 
     return total
 
@@ -204,7 +232,7 @@ def _calc_option_market_risk(
 
     # 单边未对冲：客户端 + 对冲端各自独立计提
     if otc.direction == "buy":
-        client_risk = s_client * RATES["equtity_long_option"]   # 买入期权 100%
+        client_risk = s_client * RATES["equity_long_option"]   # 买入期权 100%
     else:
         client_risk = s_client * RATES["equity_short_option"]   # 卖出期权 30%
     return client_risk + _calc_hedge_market_risk(hedge_list, otc.contract_type)
@@ -245,8 +273,10 @@ def _calc_income_cert_market_risk(
     收益凭证的市场风险资本准备（万元，不含 k_class）
     仅浮动收益凭证（含内嵌衍生品）才计提
     """
-    if otc.stress_loss is None:
-        return 0.0  # 固定收益凭证：无市场风险资本准备
+    if not otc.has_embedded_option:
+        # 固定收益凭证本身无权益衍生品市场风险；若仍配置交易端头寸，
+        # 这些头寸不能随主产品一起归零，须作为独立自营头寸计提。
+        return _calc_hedge_market_risk(hedge_list, otc.contract_type)
 
     s_client = _get_client_investment_scale(otc)  # S_short
     s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
@@ -302,7 +332,8 @@ def calc_total_risk_reserve(
          - 浮动型: S_short×30%×k_class / 对冲: (|S_short|+|S_hedge|)×5%×k_class
 
     【分类评价系数 k_class】
-      AAA=0.4, AA=0.6, A=0.8, BBB=0.9, BB=1.0, B=1.0, C=1.0, D=2.0
+      连续三年A类且AA级以上=0.4，连续三年A类=0.6，A类=0.8，
+      B类=0.9，C类=1.0，D类=2.0。
     """
     ct = otc.contract_type
     k_class = DEFAULT_CONFIG["firm"]["classification_factor"]
@@ -323,4 +354,16 @@ def calc_total_risk_reserve(
         return 0.0
 
     total = (market_risk + credit_risk) * k_class
+    return total
+
+
+def calc_self_operated_equity_scale(
+    otc: OtcContract, hedge_list: List[HedgeTrade]
+) -> float:
+    """附件6“自营权益类证券及其衍生品”新增投资规模（万元）。"""
+    total = _get_client_investment_scale(otc)
+    for hedge in hedge_list:
+        # 当前private_fund按集合/单一产品填列，不在缺少穿透分类时并入权益类规模。
+        if hedge.tool_type != "private_fund":
+            total += _get_hedge_investment_scale(hedge, otc.contract_type)
     return total
