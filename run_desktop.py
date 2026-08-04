@@ -60,11 +60,17 @@ def main():
     app_path = get_app_path()
     port = find_free_port()
 
+    # 强制关闭开发模式（PyInstaller 打包后 Streamlit 路径不含 site-packages，
+    # 会自动误判为开发环境，导致前端静态资源路由不挂载 → 浏览器 404 Not Found）
+    import streamlit.config as _st_config
+    _st_config.set_option("global.developmentMode", False)
+
     # 设置环境变量（Streamlit 会读取）
     os.environ["STREAMLIT_SERVER_PORT"] = str(port)
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_THEME_BASE"] = "light"
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENTMODE"] = "false"
 
     print(f"[桌面启动器] 应用路径: {app_path}")
     print(f"[桌面启动器] 服务端口: {port}")
