@@ -20,7 +20,7 @@ CN_CONTRACT_TYPE = {
 }
 CN_PRODUCT = {"场外期权": "option", "收益互换": "equity_swap", "收益凭证": "income_certificate"}
 
-CN_DIRECTION = {"买入": "buy", "卖出": "short", "多头": "long", "空头": "short"}
+CN_DIRECTION = {"买入": "buy", "卖出": "short", "多头": "long", "空头": "short", "发行": "issue"}
 
 # 对冲工具方向：后端 HedgeTrade 用 long/short，与合约端 buy/short 不同
 CN_HEDGE_DIRECTION = {"买入": "long", "卖出": "short"}
@@ -137,24 +137,58 @@ with st.sidebar:
     with st.expander("公司基准参数", expanded=False):
         st.session_state['firm_params'] = {
             "HQLA_base": st.number_input("当前HQLA总额（万元）", value=DEFAULT_CONFIG["firm"]["HQLA_base"]/10000, step=10000.00),
-            "LCR_COF_base": st.number_input("当前LCR未来30日净流出（万元）", value=DEFAULT_CONFIG["firm"]["LCR_COF_base"]/10000, step=10000.00),
+            "HQLA_equity_raw_base": st.number_input("其中：指数成份股/宽基ETF折算前可计入额（万元）", value=DEFAULT_CONFIG["firm"]["HQLA_equity_raw_base"]/10000, step=1000.00),
+            "LCR_outflow_base": st.number_input("当前LCR未来30日毛流出（万元）", value=DEFAULT_CONFIG["firm"]["LCR_outflow_base"]/10000, step=10000.00),
+            "LCR_inflow_base": st.number_input("当前LCR未来30日毛流入（万元）", value=DEFAULT_CONFIG["firm"]["LCR_inflow_base"]/10000, step=10000.00),
             "ASF_base": st.number_input("当前ASF总额（万元）", value=DEFAULT_CONFIG["firm"]["ASF_base"]/10000, step=10000.00),
             "RSF_base": st.number_input("当前RSF总额（万元）", value=DEFAULT_CONFIG["firm"]["RSF_base"]/10000, step=10000.00),
             "net_capital_base": st.number_input("当前净资本（万元）", value=DEFAULT_CONFIG["firm"]["net_capital_base"]/10000, step=10000.00),
+            "core_net_capital_base": st.number_input("当前核心净资本（万元）", value=DEFAULT_CONFIG["firm"]["core_net_capital_base"]/10000, step=10000.00),
             "total_risk_reserve_base": st.number_input("当前风险资本准备（万元）", value=DEFAULT_CONFIG["firm"]["total_risk_reserve_base"]/10000, step=10000.00),
-            "classification_factor": st.selectbox("分类评价系数", [0.4, 0.6, 0.8, 0.9, 1.0, 2.0], index=4),
+            "self_operated_equity_scale_base": st.number_input("当前自营权益类证券及衍生品规模（万元）", value=DEFAULT_CONFIG["firm"]["self_operated_equity_scale_base"]/10000, step=10000.00),
+            "on_off_balance_total_asset_base": st.number_input("当前表内外资产总额（万元）", value=DEFAULT_CONFIG["firm"]["on_off_balance_total_asset_base"]/10000, step=10000.00),
+            "classification_factor": st.selectbox(
+                "风险资本准备分类调整系数",
+                [0.4, 0.6, 0.8, 0.9, 1.0, 2.0],
+                index=4,
+                format_func=lambda x: {
+                    0.4: "连续三年A类且AA级以上（0.4）",
+                    0.6: "连续三年A类（0.6）",
+                    0.8: "A类（0.8）",
+                    0.9: "B类（0.9）",
+                    1.0: "C类（1.0）",
+                    2.0: "D类（2.0）",
+                }[x],
+            ),
+            "asset_adjustment_factor": st.selectbox(
+                "表内外资产总额分类调整系数",
+                [0.7, 0.9, 1.0],
+                index=2,
+                format_func=lambda x: {
+                    0.7: "连续三年A类且AA级以上（0.7）",
+                    0.9: "连续三年A类（0.9）",
+                    1.0: "其他（1.0）",
+                }[x],
+            ),
+            "asf_rating_factor": st.selectbox(
+                "6-12个月不可提前偿还负债ASF折算率",
+                [0.20, 0.10, 0.00],
+                index=2,
+            ),
+            "operational_risk_recognition_weight": st.selectbox("预计收入进入三年均值的权重", [0.0, 1/3, 2/3, 1.0], index=0, format_func=lambda x: {0.0:"当前快照（0）",1/3:"进入1个年度（1/3）",2/3:"进入2个年度（2/3）",1.0:"稳定期（1）"}[x]),
         }
 
 # ========== 主区域 ==========
-tab1, tab2, tab3 = st.tabs(["📝 模块A：场内合约端", "🔄 模块B：交易端（对冲工具）", "📈 结果展示"])
+tab1, tab2, tab3 = st.tabs(["📝 模块A：客户端场外合约", "🔄 模块B：交易端（对冲工具）", "📈 结果展示"])
 
 with tab1:
-    st.subheader("场内合约端业务要素")
+    st.subheader("客户端场外合约业务要素")
     col1, col2 = st.columns(2)
     
     with col1:
         contract_type = st.selectbox("业务类型", ["场外期权", "收益互换", "收益凭证"])
-        direction = st.selectbox("交易方向", ["买入", "卖出"] if contract_type != "收益互换" else ["多头", "空头"])
+        direction_options = ["多头", "空头"] if contract_type == "收益互换" else ["发行"] if contract_type == "收益凭证" else ["买入", "卖出"]
+        direction = st.selectbox("交易方向", direction_options)
         notional = st.number_input("名义本金/发行规模（万元）", min_value=0.0, value=1000.0, step=100.0)
         
         # 预期收益与期限
@@ -201,6 +235,9 @@ with tab1:
         stress_loss = None
         option_delta = None
         underlying_type = "index_component"
+        underlying_instrument = "index"
+        has_embedded_option = False
+        embedded_option_notional = None
 
         # 期权类型（仅场外期权）
         client_option_type = None
@@ -239,31 +276,28 @@ with tab1:
         
         elif contract_type == "收益互换":
             margin_rate = st.number_input("保证金/预付金比例（%）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
-            # 标的资产属性仅用于收益互换的惩罚条件B（个股标的）
-            is_individual_stock = st.checkbox(
-                "标的资产为境内个股（非宽基/非指数成分股）",
-                value=False,
-                help="勾选后触发惩罚条件B：市场风险资本准备加倍。标的资产分类详情见模块B。"
-            )
-            underlying_type = "general_stock" if is_individual_stock else "index_component"
             delta_amount = None
             stress_loss = None
         
         else:  # 收益凭证
             funds_raised = st.number_input("募集资金总额（万元）", value=notional, step=100.0)
             delta_amount = None
-            st.caption("浮动型收益凭证（内嵌期权结构）需填写压力损失；固定型请留空")
-            stress_loss = st.number_input("压力损失（万元）", value=0.0, step=10.0,
-                                          help="浮动型凭证在标的资产极端波动下的最大亏损。填0或留空表示固定型（风险准备=0）")
-            if stress_loss == 0.0:
-                stress_loss = None  # 0 → None = 固定型
+            certificate_structure = st.selectbox("凭证结构", ["固定收益凭证", "含内嵌权益期权"])
+            has_embedded_option = certificate_structure == "含内嵌权益期权"
+            if has_embedded_option:
+                embedded_option_notional = st.number_input("内嵌期权实际名义金额（万元）", value=notional, step=100.0)
+                stress_loss = st.number_input("内嵌期权±20%压力最大损失（万元）", value=notional * 0.1, step=10.0)
     
     # ---- 标的资产信息（所有产品类型共用）----
     st.divider()
     st.caption("标的资产代码用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
     underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="client_ul_code")
+    if contract_type != "收益凭证" or has_embedded_option:
+        instrument_cn = st.selectbox("标的形态", ["境内指数", "境内ETF", "境内个股"])
+        underlying_instrument = {"境内指数": "index", "境内ETF": "etf", "境内个股": "stock"}[instrument_cn]
+        underlying_type = "general_stock" if underlying_instrument == "stock" else "index_component"
 
-    # ---- 场外卖出期权保证金（影响净资本扣减）----
+    # ---- 场外期权压力损失估算辅助字段 ----
     option_margin_amount = None
     option_margin_rate = None
     exercise_price = None
@@ -271,29 +305,7 @@ with tab1:
     contract_size = None
     if "期权" in contract_type and direction == "卖出":
         st.divider()
-        st.caption("场外卖出期权保证金（用于净资本扣减；不填则使用默认 20%）")
-        col_margin1, col_margin2 = st.columns(2)
-        with col_margin1:
-            option_margin_amount = st.number_input(
-                "保证金金额（万元）",
-                value=0.0,
-                step=10.0,
-                key="client_option_margin_amount",
-                help="直接填写保证金绝对金额，优先于比例",
-            )
-        with col_margin2:
-            option_margin_rate = st.number_input(
-                "保证金比例（%）",
-                min_value=0.0,
-                max_value=100.0,
-                value=DEFAULT_CONFIG["client"]["option_margin_rate"] * 100,
-                step=1.0,
-                key="client_option_margin_rate",
-            )
-        if option_margin_amount == 0.0:
-            option_margin_amount = None
-
-        # 压力损失估算辅助字段（当前后端保留供扩展，非必填）
+        st.caption("场外保证金不能直接按交易所期货（期权）保证金100%扣减净资本；需另行确认会计科目。")
         with st.expander("压力损失估算参数（可选）", expanded=False):
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
@@ -320,12 +332,16 @@ with tab1:
         "direction": en_direction,
         "notional": notional,
         "underlying_type": underlying_type,
+        "underlying_instrument": underlying_instrument,
+        "underlying_market": "CN",
         "underlying_name": None,
         "underlying_code": (underlying_code or "").strip(),
         "option_type": CN_OPTION_TYPE[client_option_type] if client_option_type else None,
         "premium_rate": premium_rate,
         "margin_rate": margin_rate,
         "funds_raised": funds_raised,
+        "has_embedded_option": has_embedded_option,
+        "embedded_option_notional": embedded_option_notional,
         "option_delta": option_delta,
         "stress_loss": stress_loss,
         "option_margin_amount": option_margin_amount,
@@ -344,14 +360,12 @@ with tab2:
     
     with st.expander("📋 标的资产分类"):
         st.markdown("""
-        | 资产分类（下拉选项） | 适用范围 | 股票RSF | ETF RSF | HQLA折算率 |
+        | 资产分类 | 市场风险资本准备 | NSFR RSF | HQLA折算率 |
         |---------|------|--------|--------|-----------|
-        | **指数成分股** | 沪深300/中证500/上证180/深证100成分股、宽基ETF | 30% | 10% | 50% |
-        | **一般上市公司股票** | 非指数成分股的普通股票、非宽基ETF | 50% | 50% | 0% |
-        | **流动受限股票** | 限售股等 | 100% | — | 0% |
-        | **其他股票** | 上述之外的股票 | 100% | — | 0% |
+        | **宽基股票指数ETF** | 指数基金5% | 10% | 50%（另受HQLA 15%上限约束） |
+        | **其他权益ETF** | 其他权益类基金10% | 20% | 0% |
         """)
-        st.caption("提示：系统根据「工具类型」自动区分股票与ETF，在同一分类下应用各自的RSF系数。")
+        st.caption("公司当前不允许使用个股现货对冲；用于对冲权益互换的ETF不计入HQLA。")
     
     if 'hedge_tools' not in st.session_state:
         st.session_state['hedge_tools'] = []
@@ -361,7 +375,7 @@ with tab2:
         with col1:
             tool_type = st.selectbox(
                 "工具类型",
-                ["ETF现货", "个股", "场内期货", "场内期权", "场外背对背对冲", "私募基金"],
+                ["ETF现货", "场内期货", "场内期权", "场外背对背对冲", "私募基金"],
                 key="new_tool_type"
             )
             tool_direction = st.selectbox("方向", ["买入", "卖出"], key="new_tool_dir")
@@ -378,15 +392,15 @@ with tab2:
             option_code = option_ul_code = otc_underlying_code = None
             option_margin = option_margin_rate = None
             futures_margin_rate = future_delta = future_type = None
+            is_broad_based_etf = False
+            otc_hedge_contract_type = otc_stress_loss = None
+            fund_structure = fund_lookthrough_risk_rate = asset_maturity_days = fund_delta = None
 
             if tool_type == "ETF现货":
                 cash_spent = st.number_input("资金消耗（万元）", value=tool_notional)
-                stock_type_value = st.selectbox(
-                    "标的资产分类",
-                    ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
-                    key="etf_stock_type",
-                    help="参见上方「标的资产分类」表格。宽基ETF选「指数成分股」RSF=10%；非宽基ETF选「一般上市公司股票」RSF=50%"
-                )
+                etf_class = st.selectbox("ETF分类", ["宽基股票指数ETF", "其他权益ETF"], key="etf_stock_type")
+                is_broad_based_etf = etf_class == "宽基股票指数ETF"
+                stock_type_value = "指数成分股" if is_broad_based_etf else "一般上市公司股票"
                 st.caption("ETF代码为有效对冲判定必填项；若不填，系统将无法判定标的一致/相关性，风险资本准备按最保守的单边敞口计提")
                 etf_code = st.text_input("ETF代码")
 
@@ -543,14 +557,30 @@ with tab2:
                 st.caption(f"提示：{tool_direction}{option_type}的 Delta 期望符号为 **{expected}**")
 
             elif tool_type == "场外背对背对冲":
-                st.caption("表外项目余额按被对冲合约类型自动判断：期权/收益凭证类按 N×0.5%，互换类按 N×10%")
+                hedge_contract_cn = st.selectbox("平盘合约类型", ["收益互换", "场外期权"])
+                otc_hedge_contract_type = "equity_swap" if hedge_contract_cn == "收益互换" else "option"
                 otc_payment = st.number_input("向平盘方支付预付金（万元）", value=0.0, key="new_otc_payment")
                 pass_through_fee = st.number_input("平盘成本（年化%）", value=2.0, step=0.1, key="new_otc_fee")
+                if otc_hedge_contract_type == "option":
+                    option_type = st.selectbox("平盘期权类型", ["看涨期权", "看跌期权"], key="otc_option_type")
+                    option_delta = st.number_input("平盘头寸Delta（带符号）", value=-0.5, step=0.05, key="otc_option_delta")
+                    if tool_direction == "卖出":
+                        otc_stress_loss = st.number_input("平盘卖出期权±20%压力最大损失（万元）", value=tool_notional * 0.1)
                 st.caption("用于有效对冲判定，填写被对冲合约的标的代码")
                 otc_underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="otc_underlying_code")
             
             else:  # 私募基金
                 subscription_amount = st.number_input("申购金额（万元）", value=tool_notional)
+                fund_structure_cn = st.selectbox("产品结构", ["一对一单一产品/SPV", "一对多集合产品"])
+                fund_structure = "single_product" if fund_structure_cn.startswith("一对一") else "collective_product"
+                asset_maturity_days = st.number_input("资产剩余期限（天；无法确定填0）", min_value=0, value=0, step=1)
+                if asset_maturity_days == 0:
+                    asset_maturity_days = None
+                if fund_structure == "single_product":
+                    lookthrough_pct = st.number_input("可穿透底层市场风险比例（%；未知填0）", min_value=0.0, max_value=100.0, value=0.0)
+                    fund_lookthrough_risk_rate = lookthrough_pct / 100 if lookthrough_pct > 0 else None
+                fund_delta_value = st.number_input("经核验的组合Delta（系数；未知填0）", value=0.0, step=0.05)
+                fund_delta = fund_delta_value if fund_delta_value != 0 else None
         
         if st.button("添加到对冲列表", key="add_hedge"):
             # 校验：Delta 符号是否正确
@@ -562,6 +592,8 @@ with tab2:
                     "direction": CN_HEDGE_DIRECTION[tool_direction],
                     "notional": tool_notional,
                     "underlying_type": CN_STOCK_TYPE.get(stock_type_value, "index_component") if stock_type_value else None,
+                    "underlying_market": "CN",
+                    "is_broad_based_etf": is_broad_based_etf,
                     "underlying_name": None,
                     "underlying_code": (etf_code or stock_code or future_ul_code or option_ul_code or otc_underlying_code or "").strip(),
                     "tool_code": (option_code or "").strip(),
@@ -572,12 +604,18 @@ with tab2:
                     "future_type": future_type,
                     "option_premium": option_premium,
                     "option_delta": option_delta,
-                    "option_type": CN_OPTION_TYPE.get(option_type if tool_type == "场内期权" else None),
+                    "option_type": CN_OPTION_TYPE.get(option_type),
                     "option_margin": option_margin,
                     "option_margin_rate": option_margin_rate / 100.0 if option_margin_rate is not None else None,
                     "otc_payment": otc_payment,
                     "pass_through_fee": pass_through_fee,
+                    "otc_hedge_contract_type": otc_hedge_contract_type,
+                    "otc_stress_loss": otc_stress_loss,
                     "subscription_amount": subscription_amount,
+                    "fund_structure": fund_structure,
+                    "fund_lookthrough_risk_rate": fund_lookthrough_risk_rate,
+                    "asset_maturity_days": asset_maturity_days,
+                    "fund_delta": fund_delta,
                     "stock_type": CN_STOCK_TYPE.get(stock_type_value) if stock_type_value else None,
                 }
                 st.session_state['hedge_tools'].append(hedge)
@@ -617,7 +655,7 @@ with tab3:
             # 将侧边栏修改后的公司基准参数同步到 DEFAULT_CONFIG（万元 → 元）
             firm_params = st.session_state.get('firm_params', {})
             for key, value in firm_params.items():
-                if key == "classification_factor":
+                if key in ("classification_factor", "asset_adjustment_factor", "asf_rating_factor", "operational_risk_recognition_weight"):
                     DEFAULT_CONFIG["firm"][key] = value
                 elif isinstance(value, (int, float)):
                     DEFAULT_CONFIG["firm"][key] = value * 10000
@@ -626,12 +664,12 @@ with tab3:
             hedge_list = [HedgeTrade(**h) for h in st.session_state.get('hedge_tools', [])]
             result = analyze_contract(client, hedge_list)
 
-            # 除0保护值（后端用 999 做哨兵）在界面显示为「不适用」
+            # 无经济含义的比率在界面显示为“不适用”；兼容旧结果中的999哨兵。
             def fmt_ratio(val):
-                return "不适用" if abs(val - 999.0) < 1e-6 else f"{val:.2%}"
+                return "不适用" if val is None or abs(val - 999.0) < 1e-6 else f"{val:.2%}"
 
             def fmt_num(val):
-                return "不适用" if abs(val - 999.0) < 1e-6 else f"{val:.2f} 元/元"
+                return "不适用" if val is None or abs(val - 999.0) < 1e-6 else f"{val:.2f} 元/元"
 
             # ===== 第一层：现金流与资源消耗绝对值 =====
             st.markdown("### 第一层：现金流与资源消耗绝对值")
@@ -642,7 +680,7 @@ with tab3:
 
             # ===== 第二层：核心风控指标边际变动 =====
             st.markdown("### 第二层：核心风控指标边际变动")
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
 
             lcr_delta = result['lcr_change']
             col1.metric("LCR", fmt_ratio(result['lcr_new']),
@@ -668,6 +706,11 @@ with tab3:
                         delta_color="inverse" if rc_delta < 0 else "normal")
             col4.caption(f"原值: {fmt_ratio(result['risk_coverage_old'])} ｜ ≥100%")
 
+            eq_delta = result['equity_scale_ratio_change']
+            col5.metric("自营权益规模/净资本", fmt_ratio(result['equity_scale_ratio_new']),
+                        delta=f"{eq_delta:+.2%}", delta_color="inverse" if eq_delta > 0 else "normal")
+            col5.caption(f"原值: {fmt_ratio(result['equity_scale_ratio_old'])} ｜ ≤100%")
+
             # ===== 第三层：动态性价比指标 =====
             st.markdown("### 第三层：动态性价比指标")
             col1, col2, col3 = st.columns(3)
@@ -682,6 +725,11 @@ with tab3:
             st.info(f"对冲有效性: {'✅ 有效对冲' if result['is_effective_hedge'][0] else '❌ 未达有效对冲'}")
             if not result['is_effective_hedge'][0]:
                 st.caption(f"原因: {result['is_effective_hedge'][1]}")
+            constraints = result["business_constraints"]
+            for error in constraints["errors"]:
+                st.error(f"业务范围错误：{error}")
+            for warning in constraints["warnings"]:
+                st.warning(warning)
 
             # 调试信息：展示实际传入的标的代码与 Delta，便于排查 TC01/TC02 类问题
             with st.expander("对冲判定详情（调试用）"):
@@ -697,11 +745,12 @@ with tab3:
                 if not result['is_effective_hedge'][0]:
                     st.write(f"未通过原因：{result['is_effective_hedge'][1]}")
 
-            status_cols = st.columns(4)
+            status_cols = st.columns(5)
             status_cols[0].write(f"LCR: {'✅ 安全' if result['lcr_status'] == 'safe' else '⚠️ 预警' if result['lcr_status'] == 'warning' else '🚨 危险'}")
             status_cols[1].write(f"NSFR: {'✅ 安全' if result['nsfr_status'] == 'safe' else '⚠️ 预警' if result['nsfr_status'] == 'warning' else '🚨 危险'}")
             status_cols[2].write(f"资本杠杆率: {'✅ 安全' if result['leverage_status'] == 'safe' else '⚠️ 预警' if result['leverage_status'] == 'warning' else '🚨 危险'}")
             status_cols[3].write(f"风险覆盖率: {'✅ 安全' if result['risk_coverage_status'] == 'safe' else '⚠️ 预警' if result['risk_coverage_status'] == 'warning' else '🚨 危险'}")
+            status_cols[4].write(f"自营权益规模: {'✅ 安全' if result['equity_scale_status'] == 'safe' else '⚠️ 预警' if result['equity_scale_status'] == 'warning' else '🚨 危险'}")
 
             with st.expander("查看明细"):
                 st.json(result)

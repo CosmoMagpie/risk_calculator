@@ -13,6 +13,7 @@ if _src_dir not in sys.path:
 
 from backend.models.client_contract import OtcContract
 from backend.models.hedge_trade import HedgeTrade
+from backend.config import DEFAULT_CONFIG
 from backend.calculators.lcr import calc_lcr_impact, _calc_hedge_hqla
 from backend.calculators.nsfr import calc_nsfr_impact, _calc_hedge_rsf
 from backend.calculators.leverage import calc_leverage_impact
@@ -47,6 +48,9 @@ def make_hedge(*args, **kwargs):
         "notional": 500.0,
         "underlying_type": "index_component",
         "underlying_code": "000300",
+        "is_broad_based_etf": True,
+        "otc_hedge_contract_type": "equity_swap",
+        "fund_structure": "single_product",
     }
     defaults.update(kwargs)
     return HedgeTrade(**defaults)
@@ -79,8 +83,8 @@ def test_option_short():
     # 总 HQLA = 500 - 2500 = -2000
     check("LCR HQLA (short call)", abs(lcr["hqla_change"] - (-2000.0)) < 0.01,
           f"got {lcr['hqla_change']}")
-    # COF: S_short = max(5*200, 10000*0.5%) = max(1000, 50) = 1000; × 20% = 200
-    check("LCR COF (short call)", abs(lcr["net_cof_change"] - 200.0) < 0.01,
+    # 附件4按场外卖出期权名义金额×20%，不得套用风险资本准备的S_short。
+    check("LCR COF (short call)", abs(lcr["net_cof_change"] - 2000.0) < 0.01,
           f"got {lcr['net_cof_change']}")
 
     # NSFR
@@ -88,18 +92,16 @@ def test_option_short():
     # ASF: T=180天(<365, >=180) → 0% → 0
     check("NSFR ASF (short call 180d)", abs(nsfr["asf_change"] - 0.0) < 0.01,
           f"got {nsfr['asf_change']}")
-    # RSF client: S_short=1000 × 12% = 120
-    # RSF hedge: ETF index 5000×10% = 500 → total 620
-    check("NSFR RSF (short call)", abs(nsfr["rsf_change"] - 620.0) < 0.01,
+    # 附件5：场外卖出期权名义金额×12%=1200；宽基ETF×10%=500。
+    check("NSFR RSF (short call)", abs(nsfr["rsf_change"] - 1700.0) < 0.01,
           f"got {nsfr['rsf_change']}")
 
     # Risk Reserve (unhedged，对冲未生效)
     rr = calc_total_risk_reserve(otc, hedges, is_hedge_effective=False)
     # S_client = S_short = max(5*200, 10000*0.5%) = 1000
     # 客户端 Market risk = 1000 × 30% × 1.0 = 300
-    # 对冲端 ETF index 5000 × 8% = 400（未生效对冲需单独计提）
-    # Total = 700
-    check("RiskReserve unhedged (short call)", abs(rr - 700.0) < 0.01,
+    # ETF属于权益类指数基金，按5%而不是指数成份股8%：5000×5%=250。
+    check("RiskReserve unhedged (short call)", abs(rr - 550.0) < 0.01,
           f"got {rr}")
 
     # Risk Reserve (hedged)
@@ -116,8 +118,8 @@ def test_option_short():
         stress_loss=200.0, expected_yield=0.08,
     )
     nsfr2 = calc_nsfr_impact(otc_long, [])
-    # ASF: T=400天 ≥ 365 → premium × 100% = 500
-    check("NSFR ASF (short call 400d)", abs(nsfr2["asf_change"] - 500.0) < 0.01,
+    # 期权权利金不是有期限借款或负债，不因合约期限计入ASF。
+    check("NSFR ASF (short call 400d)", abs(nsfr2["asf_change"] - 0.0) < 0.01,
           f"got {nsfr2['asf_change']}")
 
     # LCR: 买入期权无 COF
@@ -269,9 +271,9 @@ def test_income_cert():
     check("NSFR ASF (≥1y)", abs(nsfr1y["asf_change"] - 50000.0) < 0.01,
           f"got {nsfr1y['asf_change']}")
 
-    # Risk Reserve (固定 = 0)
+    # 固定凭证本身为0，但额外配置的股票/ETF仍作为独立自营头寸计提。
     rr = calc_total_risk_reserve(otc_fixed, hedges, is_hedge_effective=False)
-    check("RiskReserve (fixed cert = 0)", abs(rr - 0.0) < 0.01,
+    check("RiskReserve (fixed cert + standalone hedges)", abs(rr - 8500.0) < 0.01,
           f"got {rr}")
 
     # 浮动收益凭证
@@ -283,18 +285,18 @@ def test_income_cert():
         underlying_code="000300",
         funds_raised=50000.0,
         term_days=90,
-        stress_loss=300.0,  # 含内嵌衍生品
+        has_embedded_option=True,
+        embedded_option_notional=50000.0,
+        stress_loss=300.0,
         expected_yield=0.05,
     )
-    # LCR: 浮动的内嵌期权 → S_short = max(5*300, 50000*0.5%) = max(1500, 250) = 1500
-    # COF = 1500 × 20% = 300
+    # LCR/NSFR按各自表的名义金额口径，不使用S_short。
     lcr_fl = calc_lcr_impact(otc_float, [])
-    check("LCR COF (floating cert)", abs(lcr_fl["net_cof_change"] - 300.0) < 0.01,
+    check("LCR COF (floating cert)", abs(lcr_fl["net_cof_change"] - 10000.0) < 0.01,
           f"got {lcr_fl['net_cof_change']}")
 
-    # NSFR: RSF = S_short × 12% = 1500 × 12% = 180
     nsfr_fl = calc_nsfr_impact(otc_float, [])
-    check("NSFR RSF (floating cert)", abs(nsfr_fl["rsf_change"] - 180.0) < 0.01,
+    check("NSFR RSF (floating cert)", abs(nsfr_fl["rsf_change"] - 6000.0) < 0.01,
           f"got {nsfr_fl['rsf_change']}")
 
     # Risk Reserve: S_short=1500 × 30% = 450
@@ -353,18 +355,21 @@ def test_helpers():
 
     # 各种对冲类型 HQLA 测试
     h_etf_idx = make_hedge(tool_type="etf", notional=1000.0, direction="long", underlying_type="index_component")
-    hqla1 = _calc_hedge_hqla([h_etf_idx])
+    hqla1_parts = _calc_hedge_hqla("call_option", [h_etf_idx])
+    hqla1 = hqla1_parts["non_equity_change"] + hqla1_parts["equity_raw_change"]
     # cash=-1000, asset=1000×50%=500 → net=-500
     check("HQLA ETF index", abs(hqla1 - (-500.0)) < 0.01, f"got {hqla1}")
 
     h_stock_gen = make_hedge(tool_type="stock", notional=1000.0, direction="long",
                              stock_type="general_stock", underlying_type="general_stock")
-    hqla2 = _calc_hedge_hqla([h_stock_gen])
+    hqla2_parts = _calc_hedge_hqla("call_option", [h_stock_gen])
+    hqla2 = hqla2_parts["non_equity_change"] + hqla2_parts["equity_raw_change"]
     # cash=-1000, asset=0 → net=-1000
     check("HQLA stock general", abs(hqla2 - (-1000.0)) < 0.01, f"got {hqla2}")
 
     h_fut = make_hedge(tool_type="futures", notional=10000.0, direction="short")
-    hqla3 = _calc_hedge_hqla([h_fut])
+    hqla3_parts = _calc_hedge_hqla("call_option", [h_fut])
+    hqla3 = hqla3_parts["non_equity_change"] + hqla3_parts["equity_raw_change"]
     # margin = 10000×12% = 1200 paid out → hqla -= 1200 → -1200
     check("HQLA futures margin", abs(hqla3 - (-1200.0)) < 0.01, f"got {hqla3}")
 
@@ -380,9 +385,9 @@ def test_helpers():
     # stock restricted: 1000×100% = 1000
     # futures: 5000×12% = 600
     # otc: 3000×1% = 30
-    # private_fund: 4000×20% = 800
-    # total = 2630
-    check("RSF multi-hedge", abs(rsf_test - 2630.0) < 0.01, f"got {rsf_test}")
+    # private_fund/SPV期限未知，按其他资产1年以上100%=4000
+    # total = 5830
+    check("RSF multi-hedge", abs(rsf_test - 5830.0) < 0.01, f"got {rsf_test}")
 
 
 # ============================================================
@@ -403,11 +408,11 @@ def test_leverage():
     ]
     # net_day1_cash: 收权利金 500w - 期货保证金 8000×12%=960w = -460
     lev = calc_leverage_impact(otc_opt, hedges, net_day1_cash=-460.0)
-    # Δ表内 = -460
+    # 支付期货保证金只是现金转为存出保证金；卖出期权收取500使总资产增加500。
     # Δ表外_client = S_short = max(5×200, 10000×0.5%) = 1000
     # Δ表外_hedge = 期货 8000×15% = 1200
-    # total = -460 + 1000 + 1200 = 1740
-    check("Leverage option short+futures", abs(lev - 1740.0) < 0.01, f"got {lev}")
+    # total = 500 + 1000 + 1200 = 2700
+    check("Leverage option short+futures", abs(lev - 2700.0) < 0.01, f"got {lev}")
 
     # 买入期权：表外=0
     otc_buy = OtcContract(
@@ -416,8 +421,8 @@ def test_leverage():
         option_type="put_option", premium_rate=3.0,
     )
     lev2 = calc_leverage_impact(otc_buy, [], net_day1_cash=-300.0)
-    # Δ表内 = -300, Δ表外 = 0 → total = -300
-    check("Leverage buy option = 0 off-balance", abs(lev2 - (-300.0)) < 0.01, f"got {lev2}")
+    # 支付权利金同时取得衍生金融资产，总资产净变化0；买入期权表外也为0。
+    check("Leverage buy option = 0 off-balance", abs(lev2 - 0.0) < 0.01, f"got {lev2}")
 
     # --- 收益互换：非全额+个股（惩罚）---
     otc_swap = OtcContract(
@@ -444,10 +449,10 @@ def test_leverage():
     # 互换 + OTC hedge
     lev5 = calc_leverage_impact(otc_swap2, [make_hedge(tool_type="otc_hedge", notional=15000.0)],
                                 net_day1_cash=500.0)
-    # Δ表内 = 500
+    # 客户端收取保证金使总资产+2000；向平盘方支付预付金若有只改变资产形态。
     # Δ表外_client = 2000, Δ表外_hedge = 15000×10% = 1500
-    # total = 4000
-    check("Leverage swap + OTC hedge", abs(lev5 - 4000.0) < 0.01, f"got {lev5}")
+    # total = 2000 + 2000 + 1500 = 5500
+    check("Leverage swap + OTC hedge", abs(lev5 - 5500.0) < 0.01, f"got {lev5}")
 
     # --- 收益凭证：固定型（表外=0）---
     otc_fixed = OtcContract(
@@ -463,27 +468,28 @@ def test_leverage():
     otc_float = OtcContract(
         contract_type="income_certificate", direction="short", notional=50000.0,
         underlying_type="index_component", underlying_code="000300",
-        funds_raised=50000.0, term_days=90, stress_loss=300.0,
+        funds_raised=50000.0, term_days=90, has_embedded_option=True,
+        embedded_option_notional=50000.0, stress_loss=300.0,
     )
     lev7 = calc_leverage_impact(otc_float, [
         make_hedge(tool_type="futures", notional=30000.0),
     ], net_day1_cash=46400.0)
-    # Δ表内 = 46400 (50000 - 30000×12%)
+    # 期货保证金只是资产形态转换，表内总资产仍增加募集资金50000。
     # Δ表外_client = S_short = max(5×300, 50000×0.5%) = 1500
     # Δ表外_hedge = 期货 30000×15% = 4500
-    # total = 46400 + 1500 + 4500 = 52400
-    check("Leverage floating cert + futures", abs(lev7 - 52400.0) < 0.01, f"got {lev7}")
+    # total = 50000 + 1500 + 4500 = 56000
+    check("Leverage floating cert + futures", abs(lev7 - 56000.0) < 0.01, f"got {lev7}")
 
     # 场内卖出期权对冲
     lev8 = calc_leverage_impact(otc_opt, [
         make_hedge(tool_type="onsite_option", notional=6000.0, direction="short",
                    option_delta=-0.5),
     ], net_day1_cash=0.0)
-    # Δ表内 = 0 (假设)
+    # 客户端卖出场外期权收500；卖出场内期权收默认权利金120，均增加表内资产。
     # Δ表外_client = 1000 (S_short)
     # Δ表外_hedge = 6000 × 0.5 × 15% = 450
-    # total = 1450
-    check("Leverage option + onsite short", abs(lev8 - 1450.0) < 0.01, f"got {lev8}")
+    # total = 500 + 120 + 1000 + 450 = 2070
+    check("Leverage option + onsite short", abs(lev8 - 2070.0) < 0.01, f"got {lev8}")
 
     # 场内买入期权：表外=0
     lev9 = calc_leverage_impact(otc_opt, [
@@ -491,8 +497,8 @@ def test_leverage():
                    option_delta=0.5),
     ], net_day1_cash=0.0)
     # Δ表外_hedge = 0 (买入期权不计)
-    # total = 1000 + 0 + 0 = 1000
-    check("Leverage option + onsite long", abs(lev9 - 1000.0) < 0.01, f"got {lev9}")
+    # 买入场内期权仅改变资产形态；客户端卖出期权仍使表内+500、表外+1000。
+    check("Leverage option + onsite long", abs(lev9 - 1500.0) < 0.01, f"got {lev9}")
 
 
 # ============================================================
@@ -559,11 +565,72 @@ def test_ineffective_hedge_risk_and_lcr():
     # LCR 交易端流出：股指期货 500 × 20% = 100
     lcr = calc_lcr_impact(otc, [futures])
     # client: 500; hedge HQLA: -500×12% = -60; total HQLA = 440
-    # client COF: 1000×20% = 200; hedge COF: 500×20% = 100; total = 300
+    # client COF: 名义10000×20%=2000；hedge: 500×20%=100。
     check("LCR hedge outflow (futures 20%)",
-          abs(lcr["net_cof_change"] - 300.0) < 0.01, f"got {lcr['net_cof_change']}")
+          abs(lcr["net_cof_change"] - 2100.0) < 0.01, f"got {lcr['net_cof_change']}")
     check("LCR HQLA with futures hedge",
           abs(lcr["hqla_change"] - 440.0) < 0.01, f"got {lcr['hqla_change']}")
+
+
+def test_regulatory_cross_table_regressions():
+    print("\n=== 监管表跨口径回归 ===")
+
+    buy_option = OtcContract(
+        contract_type="call_option", direction="buy", notional=1000.0,
+        underlying_type="index_component", option_type="call_option",
+        total_premium_amount=0.0,
+    )
+    onsite_short = make_hedge(
+        tool_type="onsite_option", direction="short", notional=1000.0,
+        option_delta=-0.5, option_premium=0.0,
+    )
+    lcr = calc_lcr_impact(buy_option, [onsite_short])
+    nsfr = calc_nsfr_impact(buy_option, [onsite_short])
+    # Delta金额500×15%=75即最终填列额，不再乘20%或12%。
+    check("onsite short option LCR no double haircut",
+          abs(lcr["net_cof_change"] - 75.0) < 0.01, f"got {lcr['net_cof_change']}")
+    check("onsite short option NSFR no double haircut",
+          abs(nsfr["rsf_change"] - 75.0) < 0.01, f"got {nsfr['rsf_change']}")
+
+    swap = OtcContract(
+        contract_type="equity_swap", direction="short", notional=1000.0,
+        underlying_type="index_component", margin_rate=10.0,
+    )
+    swap_etf = make_hedge(
+        tool_type="etf", direction="long", notional=1000.0,
+        is_broad_based_etf=True,
+    )
+    swap_lcr = calc_lcr_impact(swap, [swap_etf])
+    # 收保证金100，买ETF现金-1000；用于对冲权益互换的ETF不计HQLA资产折算。
+    check("equity-swap hedge ETF excluded from HQLA",
+          abs(swap_lcr["hqla_change"] - (-900.0)) < 0.01,
+          f"got {swap_lcr['hqla_change']}")
+
+    firm = DEFAULT_CONFIG["firm"]
+    saved = {k: firm[k] for k in (
+        "HQLA_base", "HQLA_equity_raw_base", "LCR_outflow_base", "LCR_inflow_base"
+    )}
+    try:
+        firm["HQLA_base"] = 10_000 * 10_000
+        firm["HQLA_equity_raw_base"] = 1_500 * 10_000
+        capped = calc_lcr_impact(buy_option, [swap_etf])
+        check("equity HQLA 15% cap applied",
+              capped["hqla_change"] < -1000.0,
+              f"got {capped['hqla_change']}")
+
+        firm["LCR_outflow_base"] = 1_000 * 10_000
+        firm["LCR_inflow_base"] = 800 * 10_000
+        swap_big = OtcContract(
+            contract_type="equity_swap", direction="short", notional=50_000.0,
+            underlying_type="index_component", margin_amount=0.0,
+        )
+        nonlinear = calc_lcr_impact(swap_big, [])
+        check("LCR 75% inflow cap makes marginal net outflow nonlinear",
+              abs(nonlinear["gross_outflow_change"] - 100.0) < 0.01
+              and abs(nonlinear["net_cof_change"] - 50.0) < 0.01,
+              f"gross={nonlinear['gross_outflow_change']}, net={nonlinear['net_cof_change']}")
+    finally:
+        firm.update(saved)
 
 
 # ============================================================
@@ -581,6 +648,7 @@ if __name__ == "__main__":
     test_leverage()
     test_stress_loss_estimator()
     test_ineffective_hedge_risk_and_lcr()
+    test_regulatory_cross_table_regressions()
 
     print(f"\n{'='*60}")
     total = PASS + FAIL

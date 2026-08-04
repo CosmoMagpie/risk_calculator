@@ -43,6 +43,8 @@ class OtcContract:
     underlying_name: Optional[str] = None  # 标的资产名称（如"中证1000"），可选
     underlying_code: Optional[str] = None  # 标的资产代码（如"000852"），可选，用于查价格算相关性
     underlying_market: Optional[str] = None  # 标的资产市场（CN/US/HK/EN/Other），默认空表示境内A股
+    # 标的工具形态，用于公司业务范围约束：stock / etf / index / other。
+    underlying_instrument: Optional[str] = None
 
     # ===== 期权专有字段 =====
     # 【设计思路】不同合约类型用不同字段，未使用的字段保持 None
@@ -67,6 +69,11 @@ class OtcContract:
     # ===== 收益凭证专有字段 =====
     funds_raised: Optional[float] = None        # 募集资金总额（万元），收益凭证的实际融资额
     income_certificate_delta: Optional[float] = None      # OC Delta值（%），收益凭证通常为0（无权益敞口）
+    has_embedded_option: bool = False          # 是否含需按权益期权识别的内嵌衍生品
+    embedded_option_notional: Optional[float] = None  # 内嵌期权实际名义金额（万元）
+
+    # 仅在合同及会计科目能够证明相关负债不可提前偿还时使用；默认不把互换保证金计入ASF。
+    margin_liability_term_days: Optional[int] = None
 
     # ===== 通用字段：预期创收与期限 =====
     expected_yield: float = 0.08                # 预期年化收益率（小数），0.08=8%，用于计算预期创收
@@ -204,8 +211,7 @@ class OtcContract:
         【业务场景】券商与客户签约后，首日发生的现金变动：
           - 卖出期权：券商收取权利金 → 正值（现金流入）
           - 买入期权：券商支付权利金 → 负值（现金流出）
-          - 空头互换：券商收取客户保证金 → 正值
-          - 多头互换：券商向客户支付保证金 → 负值
+          - 收益互换：本模型字段定义为“向客户收取保证金/预付金”，与多空方向无关
           - 收益凭证：券商募集资金 → 正值（融资入账）
 
         【Python语法】if/elif/else 条件分支；self.xxx 访问实例属性；
@@ -225,13 +231,12 @@ class OtcContract:
 
         # --- 收益互换：保证金流入/流出 ---
         elif self.contract_type == "equity_swap":
-            if self.margin_rate is not None:
-                # 保证金 = 名义本金 × 保证金比例
-                return self.notional * self.margin_rate / 100 if self.direction == "short" else -self.notional* self.margin_rate / 100
-            elif self.margin_amount is not None:
-                return self.margin_amount if self.direction == "short" else -self.margin_amount
+            if self.margin_amount is not None:
+                return self.margin_amount
+            elif self.margin_rate is not None:
+                return self.notional * self.margin_rate / 100
             # 兜底：默认10%保证金
-            return self.notional * DEFAULT_CONFIG["client"]["swap_margin_rate"] if self.direction == "short" else -self.notional * DEFAULT_CONFIG["client"]["swap_margin_rate"]
+            return self.notional * DEFAULT_CONFIG["client"]["swap_margin_rate"]
 
         # --- 收益凭证：募集资金全部流入 ---
         elif self.contract_type == "income_certificate":
@@ -301,16 +306,16 @@ class OtcContract:
 
         # --- 收益凭证Delta ---
         # 固定收益凭证：无权益敞口，Delta = 0
-        # 浮动收益凭证（含内嵌期权）：视同卖出场外期权，按 option_delta 或默认平值 0.5 计算
+        # 浮动收益凭证（含内嵌期权）：视同卖出场外期权，按显式结构标识判断。
         elif "income_certificate" in self.contract_type:
-            if self.stress_loss is None:
+            if not self.has_embedded_option:
                 # 固定收益凭证
                 if self.income_certificate_delta is not None:
                     return self.income_certificate_delta * self.notional * is_long
                 return DEFAULT_CONFIG["client"]["income_certificate_delta"] * self.notional * is_long
             # 浮动收益凭证：默认按卖出看涨期权近似（券商卖出期权，标的价格上涨时亏损，Delta 为负）
             if self.option_delta is not None:
-                return -abs(self.option_delta) * self.notional
-            return -DEFAULT_CONFIG["client"]["atm_option_delta"] * self.notional
+                return self.option_delta * (self.embedded_option_notional or self.notional)
+            return -DEFAULT_CONFIG["client"]["atm_option_delta"] * (self.embedded_option_notional or self.notional)
 
         return 0.0

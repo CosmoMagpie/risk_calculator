@@ -55,16 +55,55 @@ def get_app_path() -> str:
     )
 
 
+def setup_ifind_sdk():
+    """让打包后的 iFinDPy 能找到 ctypes DLL。
+
+    iFinDPy 在模块 import 时会在 sys.path 中寻找"以 site-packages 结尾"的条目，
+    并加载 <条目>/iFinDAPI/Windows/bin/x64/ShellExport.dll。
+    PyInstaller 冻结环境下 sys.path 没有这种结构，这里把打包进来的
+    iFinDAPI/Windows 复制到 <_MEIPASS>/site-packages/iFinDAPI/Windows，
+    并把 <_MEIPASS>/site-packages 追加到 sys.path（以 site-packages 结尾，满足其查找条件）。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    import shutil
+
+    base = sys._MEIPASS  # PyInstaller onedir 模式 = dist/风控测算系统/_internal
+    api_src = os.path.join(base, "iFinDAPI", "Windows")
+    sp_dir = os.path.join(base, "site-packages")
+    if os.path.isdir(api_src):
+        sp_api = os.path.join(sp_dir, "iFinDAPI", "Windows")
+        os.makedirs(os.path.dirname(sp_api), exist_ok=True)
+        if not os.path.isdir(sp_api):
+            print("[iFinD] 正在准备 iFinD 数据接口（首次启动稍慢）...")
+            shutil.copytree(api_src, sp_api)
+    if sp_dir not in sys.path:
+        sys.path.append(sp_dir)
+
+
 def main():
     """启动 Streamlit 应用"""
+    # 必须在导入任何业务模块（含 iFinDPy）之前准备好 SDK 查找路径
+    setup_ifind_sdk()
+
     app_path = get_app_path()
     port = find_free_port()
+
+    # PyInstaller 的 onedir 布局会把 Streamlit 放到 _internal/streamlit，
+    # 其源码路径不含 site-packages，Streamlit 因而可能误判为开发环境，
+    # 不挂载前端静态资源并返回 404。环境变量须在导入 Streamlit 前设置；
+    # 随后再通过配置 API 强制覆盖，兼容不同 Streamlit 版本。
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENTMODE"] = "false"
 
     # 设置环境变量（Streamlit 会读取）
     os.environ["STREAMLIT_SERVER_PORT"] = str(port)
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_THEME_BASE"] = "light"
+
+    import streamlit.config as _st_config
+    _st_config.set_option("global.developmentMode", False)
 
     print(f"[桌面启动器] 应用路径: {app_path}")
     print(f"[桌面启动器] 服务端口: {port}")

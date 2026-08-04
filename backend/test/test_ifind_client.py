@@ -11,9 +11,13 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 设置凭证为环境变量（代码中硬编码，便于测试）
-os.environ["IFIND_USER_NAME"] = "glzq703"
-os.environ["IFIND_PASSWORD"] = "96998XuY"
+# 可选的本地联机测试凭据。提交或发送代码前必须保持为空。
+IFIND_USER_NAME = ""
+IFIND_PASSWORD = ""
+CREDENTIALS_CONFIGURED = bool(IFIND_USER_NAME and IFIND_PASSWORD)
+if CREDENTIALS_CONFIGURED:
+    os.environ["IFIND_USER_NAME"] = IFIND_USER_NAME
+    os.environ["IFIND_PASSWORD"] = IFIND_PASSWORD
 
 # 将项目根目录加入 path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -72,8 +76,8 @@ def test_environment():
     print("=" * 60)
 
     check("iFinDPy 模块可导入", RAW_API_AVAILABLE)
-    check("IFIND_USER_NAME 已设置", os.environ.get("IFIND_USER_NAME") == "glzq703")
-    check("IFIND_PASSWORD 已设置", os.environ.get("IFIND_PASSWORD") == "96998XuY")
+    check("iFinD测试凭据已填写（当前留空则跳过联机测试）",
+          CREDENTIALS_CONFIGURED, skip=not CREDENTIALS_CONFIGURED)
     check("当前时间", True)
     print(f"    当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"    是否交易时间: {is_trading_time()}")
@@ -88,12 +92,12 @@ def test_login():
     print("=" * 60)
 
     # 1a: 强制登录
-    if not RAW_API_AVAILABLE:
+    if not RAW_API_AVAILABLE or not CREDENTIALS_CONFIGURED:
         check("1a 强制登录", False, skip=True)
         return
 
     try:
-        result = THS_iFinDLogin("glzq703", "96998XuY")
+        result = THS_iFinDLogin(IFIND_USER_NAME, IFIND_PASSWORD)
         print(f"    THS_iFinDLogin 返回码: {result}")
         # 0 = 成功, -201 = 已登录
         check("1a THS_iFinDLogin 返回 0 或 -201 (成功/已登录)",
@@ -513,15 +517,18 @@ if __name__ == "__main__":
     print("=" * 60)
 
     test_environment()
-    test_login()
-    test_ths_hq()
-    test_ths_rq()
-    test_ths_ds()
-    test_price_series_and_corr()
-    test_spot_price()
-    test_option_greeks()
-    test_stress()      # 稳定性在登出之前
-    test_logout()
+    if CREDENTIALS_CONFIGURED:
+        test_login()
+        test_ths_hq()
+        test_ths_rq()
+        test_ths_ds()
+        test_price_series_and_corr()
+        test_spot_price()
+        test_option_greeks()
+        test_stress()      # 稳定性在登出之前
+        test_logout()
+    else:
+        print("\n[SKIP] 未填写 iFinD 测试账号和密码，联机接口测试全部跳过。")
 
     # ========== 汇总 ==========
     total = PASS + FAIL + SKIP
@@ -542,7 +549,7 @@ if __name__ == "__main__":
         print("\n  常见问题排查:")
         print("  - -209 (params invalid): 检查代码格式(如000300.SH)和参数顺序")
         print("  - 1010 (logout): 可能是 session 超时或长时间未操作")
-        print("  - 若全部 FAIL 但 0a 环境正常: 检查 iFinD 终端是否已启动并登录") 
+        print("  - 若全部 FAIL 但 0a 环境正常: 检查 iFinD 终端是否已启动并登录")
     else:
         print("  >>> 无有效测试结果，请检查 iFinD 环境 <<<")
 

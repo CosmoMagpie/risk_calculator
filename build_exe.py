@@ -58,6 +58,11 @@ def build():
         "--hidden-import", "scipy.stats",
         "--hidden-import", "pandas",
         "--hidden-import", "numpy",
+        # iFinD 数据接口：app.py 仅作为数据文件打入且 iFinDPy 在 try/except
+        # 中导入，PyInstaller 静态分析收集不到，必须显式指定；
+        # --collect-all iFinDAPI 同时带上其 ctypes DLL（ShellExport.dll 等）
+        "--hidden-import", "iFinDPy",
+        "--collect-all", "iFinDAPI",
         # 添加项目文件
         "--add-data", f"backend{os.pathsep}backend",
         "--add-data", f"app.py{os.pathsep}.",

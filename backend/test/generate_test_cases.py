@@ -11,9 +11,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-# 设置 iFinD 凭据（供 ifind_client 内部 _get_credentials 读取）
-os.environ["IFIND_USER_NAME"] = "glzq703"
-os.environ["IFIND_PASSWORD"] = "96998XuY"
+# 可选：如需用真实 iFinD 数据生成 TC02/TC08/TC10，可在本机临时填写；
+# 提交或发送代码前务必保持为空。留空时脚本使用既有 Mock 路径，仍生成全部11例。
+IFIND_USER_NAME = "glzq703"
+IFIND_PASSWORD = "96998XuY"
+if IFIND_USER_NAME and IFIND_PASSWORD:
+    os.environ["IFIND_USER_NAME"] = IFIND_USER_NAME
+    os.environ["IFIND_PASSWORD"] = IFIND_PASSWORD
 
 # 将项目根目录加入 sys.path，使 backend 包可被导入
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -112,6 +116,7 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "notional": 9000.0,
                 "underlying_type": "index_component",
                 "underlying_name": "沪深300ETF",
+                "is_broad_based_etf": True,
                 # 故意不填 underlying_code（前端实际传空字符串），使有效对冲判定失败
                 "underlying_code": "",
                 "cash_spent": 9000.0,
@@ -143,6 +148,7 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "notional": 9000.0,
                 "underlying_type": "index_component",
                 "underlying_name": "沪深300ETF",
+                "is_broad_based_etf": True,
                 "underlying_code": "510300.SH",
                 "cash_spent": 9000.0,
             },
@@ -170,8 +176,8 @@ TEST_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "TC04",
-        "name": "收益互换（非全额保证金 + 境内个股 → 惩罚加倍）+ 同标的股票现货对冲（有效对冲 + 惩罚叠加）",
-        "scenario": "客户以 10% 保证金做茅台个股收益互换（空头），交易台买入同标的（600519.SH）茅台股票现货对冲。因标的完全一致直接达成有效对冲，同时满足条件 A（非全额保证金）和条件 B（境内个股），有效对冲后的市场风险资本准备仍须按 2 倍计提，并额外计提信用风险资本准备——验证惩罚条件与有效对冲的叠加逻辑。",
+        "name": "收益互换（非全额保证金 + 境内个股）+ 个股现货对冲（公司约束阻断）",
+        "scenario": "保留原个股收益互换样例，用于验证两层约束：监管上触发非全额保证金境内个股互换的市场风险加倍及信用风险；公司当前又禁止个股现货对冲，因此即使标的一致也不能认定为有效对冲。",
         "client": {
             "contract_type": "equity_swap",
             "direction": "short",
@@ -218,6 +224,7 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "notional": 18000.0,
                 "underlying_type": "index_component",
                 "underlying_name": "沪深300ETF",
+                "is_broad_based_etf": True,
                 "underlying_code": "510300.SH",
                 "cash_spent": 18000.0,
             },
@@ -225,8 +232,8 @@ TEST_CASES: List[Dict[str, Any]] = [
     },
     {
         "id": "TC06",
-        "name": "固定收益凭证 + 股票/ETF 组合对冲（无风险资本准备）",
-        "scenario": "发行 60 天固定收益凭证，募集资金后配置于股票与宽基 ETF。固定收益凭证本金负债部分不计提市场风险资本准备。",
+        "name": "固定收益凭证 + 股票/ETF 组合（本体为零、独立头寸计提并触发公司约束）",
+        "scenario": "保留原60天固定收益凭证及股票/ETF配置。固定收益凭证本体不计权益衍生品市场风险，但配置头寸不能随本体归零：ETF独立计提，个股工具还会触发公司禁止个股现货对冲的约束。",
         "client": {
             "contract_type": "income_certificate",
             "direction": "short",
@@ -255,6 +262,7 @@ TEST_CASES: List[Dict[str, Any]] = [
                 "notional": 20000.0,
                 "underlying_type": "index_component",
                 "underlying_name": "沪深300ETF",
+                "is_broad_based_etf": True,
                 "underlying_code": "510300.SH",
                 "cash_spent": 20000.0,
             },
@@ -272,6 +280,8 @@ TEST_CASES: List[Dict[str, Any]] = [
             "underlying_name": "沪深300指数",
             "underlying_code": "000300.SH",
             "funds_raised": 50000.0,
+            "has_embedded_option": True,
+            "embedded_option_notional": 50000.0,
             "stress_loss": 300.0,
             "expected_yield": 0.05,
             "term_days": 90,
@@ -505,7 +515,7 @@ def _dict_to_md_table(
         display_raw = v if v is not None else "（未填写）"
         # 空字符串不翻译
         if isinstance(display_raw, str) and display_raw.strip() == "":
-            display = display_raw
+            display = "（空）"
         elif isinstance(display_raw, str) and display_raw != "（未填写）":
             # 优先用上下文相关的 direction 翻译
             if k == "direction":
@@ -530,15 +540,15 @@ def _fmt_money(x: float) -> str:
     return f"{x:,.2f} 万元"
 
 
-def _fmt_pct(x: float) -> str:
-    # 后端用 999 做除零保护哨兵，文档中统一显示为「不适用」
-    if abs(x - 999.0) < 1e-6:
+def _fmt_pct(x: float | None) -> str:
+    # 新后端对无经济含义的性价比返回 None；兼容旧版 999 哨兵。
+    if x is None or abs(x - 999.0) < 1e-6:
         return "不适用"
     return f"{x:.4%}"
 
 
-def _fmt_ratio(x: float) -> str:
-    if abs(x - 999.0) < 1e-6:
+def _fmt_ratio(x: float | None) -> str:
+    if x is None or abs(x - 999.0) < 1e-6:
         return "不适用"
     return f"{x:.4f} 元/元"
 
@@ -596,7 +606,7 @@ def generate_markdown() -> str:
 
         # 模块 A 输入
         lines.extend([
-            "### 模块 A：场内合约端输入",
+            "### 模块 A：客户端场外合约输入",
             "",
             _dict_to_md_table(case["client"], contract_type=case["client"].get("contract_type", "")),
             "",
@@ -721,13 +731,14 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
 
     # 3. 收益凭证
     if ct == "income_certificate":
-        if client.get("stress_loss") is None:
+        if not client.get("has_embedded_option", False):
             notes.append("- 固定收益凭证：本金负债部分不计提市场/信用风险资本准备。")
-            notes.append("- 收益凭证默认 Delta 为 0，系统判定为'Delta 敞口数据缺失'，即不存在可对冲的方向性权益敞口。")
+            notes.append("- 固定收益凭证本体 Delta 为0；配置的交易端头寸仍按各自类别独立计提。")
         else:
             notes.append("- 浮动收益凭证：内嵌衍生品视同卖出场外期权，按 S_short × 30% 计提市场风险资本准备。")
-            s_short = max(5 * client["stress_loss"], notional * 0.005)
-            notes.append(f"- S_short = max(5×{client['stress_loss']}, {notional}×0.5%) = {s_short:.2f} 万元。")
+            embedded_notional = client.get("embedded_option_notional") or notional
+            s_short = max(5 * client["stress_loss"], embedded_notional * 0.005)
+            notes.append(f"- S_short = max(5×{client['stress_loss']}, {embedded_notional}×0.5%) = {s_short:.2f} 万元。")
             notes.append("- 浮动收益凭证默认 Delta 按卖出场外期权口径为负（视同卖出看涨期权），可参与有效对冲判定。")
 
     # 4. 期权 S_short
@@ -735,7 +746,7 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
         loss = client.get("stress_loss") or 0.0
         s_short = max(5 * loss, notional * 0.005)
         notes.append(f"- 卖出期权投资规模 S_short = max(5×{loss}, {notional}×0.5%) = {s_short:.2f} 万元。")
-        notes.append(f"- LCR 表外流出增量 = S_short × 20% = {s_short * 0.20:.2f} 万元。")
+        notes.append(f"- LCR毛流出增量按期末名义金额 = N × 20% = {notional * 0.20:.2f} 万元；不使用S_short。")
 
     # 5. 净资本变动（保证金扣减）
     nc_change = result["net_capital_change"]
@@ -756,7 +767,7 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
         if has_futures:
             detail.append("股指期货按名义价值 × 20% 计提资金流出")
         if has_onsite_short:
-            detail.append("卖出场内期权按 Delta金额 × 15% × 20% 计提资金流出")
+            detail.append("卖出场内期权按 Delta金额 × 15% 作为最终填列额，不再乘20%")
         if has_otc_back:
             detail.append("场外背对背互换按名义本金 × 0.2% 计提资金流出")
         notes.append("- 交易端衍生品对冲已按 LCR 口径计入自营资金流出（" + "；".join(detail) + "）。")

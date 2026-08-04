@@ -1,172 +1,170 @@
-# ============================================================
-# backend/calculators/lcr.py - LCR（流动性覆盖率）影响计算
-# ============================================================
+"""LCR（流动性覆盖率）边际影响。
+
+监管口径来自附件4。风险资本准备/表内外资产的“投资规模”不能替代本表的
+合约期末名义价值；卖出场内期权的Delta金额×15%为最终填列金额，不再乘20%。
+"""
 
 from typing import Dict, List
 
+from ..config import DEFAULT_CONFIG
 from ..models.client_contract import OtcContract
 from ..models.hedge_trade import HedgeTrade
-from .ratios import HQLA_DISCOUNT
+from .ratios import HQLA_DISCOUNT, LCR_OUTFLOW_RATES
 
 
 def _calc_hedge_outflow(hedge_list: List[HedgeTrade]) -> float:
-    """
-    计算交易端对冲工具的未来30日现金流出增量 ΔOutflow（万元）
-
-    依据《证券公司流动性覆盖率计算表》（附件4）注7：
-      - 股指期货：按合约名义价值总额的 20% 计算
-      - 卖出场内期权：按 Delta 金额的 15% × 20% 计算
-      - 场外背对背收益互换：按名义本金 × 0.2% 计算
-      - ETF/股票现货/私募基金/买入场内期权等：0
-
-    注：期货、卖出期权按单品种（合约标的）单边最大名义价值填列；
-        本函数按单条对冲工具名义价值保守加总。
-    """
-    cof = 0.0
-    for h in hedge_list:
-        if h.tool_type == "futures":
-            cof += h.notional * 0.20
-        elif h.tool_type == "onsite_option" and h.direction == "short":
-            delta_amount = abs(h.option_delta or 0.5) * h.notional
-            cof += delta_amount * 0.15 * 0.20
-        elif h.tool_type == "otc_hedge":
-            # 视同为权益互换处理（模型中 otc_hedge 主要用于背对背互换/期权平盘，
-            # 此处保守按互换 0.2% 计提；后续可依据结构细化）
-            cof += h.notional * 0.002
-    return cof
+    """交易端对冲工具新增未来30日毛现金流出（万元）。"""
+    total = 0.0
+    for hedge in hedge_list:
+        if hedge.tool_type == "futures":
+            total += hedge.notional * LCR_OUTFLOW_RATES["stock_index_future"]
+        elif hedge.tool_type == "onsite_option" and hedge.direction == "short":
+            delta_amount = abs(hedge.option_delta or 0.5) * hedge.notional
+            total += delta_amount * LCR_OUTFLOW_RATES["onsite_short_option"]
+        elif hedge.tool_type == "otc_hedge":
+            if hedge.otc_hedge_contract_type == "equity_swap":
+                total += hedge.notional * LCR_OUTFLOW_RATES["equity_swap"]
+            elif hedge.otc_hedge_contract_type == "option" and hedge.direction == "short":
+                total += hedge.notional * LCR_OUTFLOW_RATES["otc_short_option"]
+    return total
 
 
-def _calc_hedge_hqla(hedge_list: List[HedgeTrade]) -> float:
-    """
-    计算交易端对冲工具的 ΔHQLA（优质流动性资产变动量，万元）
+def _calc_hedge_hqla(
+    client_contract_type: str, hedge_list: List[HedgeTrade]
+) -> Dict[str, float]:
+    """拆分现金/非权益HQLA变化与受15%上限约束的权益HQLA原始变化。"""
+    non_equity_change = 0.0
+    equity_raw_change = 0.0
 
-    【规则】
-      现金流出直接减少 HQLA，但买入的现货/ETF 根据标的类型有不同折算率：
-        - 指数成分股/宽基ETF：HQLA 折算率 50%
-          例：买入 100 万沪深300 ETF → 现金 -100 + 现货×50% = 净 ΔHQLA = -50
-        - 一般股票/期货保证金/期权权利金/私募：HQLA 折算率 0%
-          例：支付期货保证金 12 万 → 净 ΔHQLA = -12
+    for hedge in hedge_list:
+        trade_cash = hedge.get_trade_cash_outflow()
+        non_equity_change -= trade_cash
 
-      卖出（做空）方向则反向：获得现金 +HQLA，失去现券 -HQLA×折算率
-    """
-    hqla = 0.0
+        if hedge.tool_type not in ("etf", "stock"):
+            continue
 
-    for h in hedge_list:
-        trade_cash = h.get_trade_cash_outflow()  # 正值=现金流出券商, 负值=流入
-        hqla -= trade_cash  # 现金流出 → HQLA 减少；流入 → HQLA 增加
+        # 附件4注3：已用于对冲权益互换合约的证券不计入HQLA。
+        if client_contract_type == "equity_swap":
+            continue
 
-        # 只有 ETF / 股票现货才产生 HQLA 资产折算
-        if h.tool_type in ("etf", "stock"):
-            hqla_rate = HQLA_DISCOUNT.get(h.underlying_type or h.stock_type, 0.0)
-            if h.direction == "long":
-                hqla += h.notional * hqla_rate   # 买入现券 → 获得 HQLA 资产
-            elif h.direction == "short":
-                hqla -= h.notional * hqla_rate   # 卖出现券 → 失去 HQLA 资产
+        if hedge.tool_type == "etf":
+            rate = 0.50 if hedge.is_broad_based_etf else 0.0
+        else:
+            asset_type = hedge.underlying_type or hedge.stock_type
+            rate = HQLA_DISCOUNT.get(asset_type, 0.0)
 
-    return hqla
+        sign = 1.0 if hedge.direction == "long" else -1.0
+        equity_raw_change += sign * hedge.notional * rate
 
-
-def _calc_option_lcr(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
-    """
-    场外期权（call_option / put_option）的 LCR 影响计算
-    """
-    # --- ΔHQLA ---
-    # 客户端：卖出收权利金(+), 买入付权利金(-)
-    hqla_change = otc.get_otc_cash_inflow()
-    # 交易端
-    hqla_change += _calc_hedge_hqla(hedge_list)
-
-    # --- ΔOutflow（未来30日现金净流出增量）---
-    cof_change = 0.0
-    if otc.direction == "short":
-        # 卖出期权的表外项目折算：S_short × 20%
-        # S_short = max(5 × 压力测试损失, 名义本金 × 0.5%)
-        loss = otc.stress_loss if otc.stress_loss is not None else 0.0
-        s_short = max(5 * loss, otc.notional * 0.005)
-        cof_change = s_short * 0.20
-
-    # 交易端对冲工具自身的资金流出（股指期货/卖出场内期权/背对背互换）
-    cof_change += _calc_hedge_outflow(hedge_list)
-
-    return {"hqla_change": hqla_change, "net_cof_change": cof_change}
+    return {
+        "non_equity_change": non_equity_change,
+        "equity_raw_change": equity_raw_change,
+    }
 
 
-def _calc_swap_lcr(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
-    """
-    收益互换（equity_swap）的 LCR 影响计算
-    """
-    # --- ΔHQLA ---
-    # 客户端：收取保证金 +M
-    hqla_change = otc.get_otc_cash_inflow()
-    # 交易端
-    hqla_change += _calc_hedge_hqla(hedge_list)
+def _apply_equity_hqla_cap(
+    non_equity_change: float, equity_raw_change: float
+) -> float:
+    """执行指数成份股/宽基ETF折算额不超过HQLA总额15%的上限。"""
+    firm = DEFAULT_CONFIG["firm"]
+    total_base = firm["HQLA_base"] / 10000
+    raw_base = max(0.0, firm.get("HQLA_equity_raw_base", 0.0) / 10000)
 
-    # --- ΔOutflow ---
-    # 收益互换作为自营业务资金流出，按名义本金 × 0.2% 折算
-    cof_change = otc.notional * 0.002
+    counted_base = min(raw_base, total_base * 0.15)
+    other_base = total_base - counted_base
+    other_new = other_base + non_equity_change
+    raw_new = max(0.0, raw_base + equity_raw_change)
 
-    # 交易端对冲工具自身的资金流出
-    cof_change += _calc_hedge_outflow(hedge_list)
-
-    return {"hqla_change": hqla_change, "net_cof_change": cof_change}
-
-
-def _calc_income_cert_lcr(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
-    """
-    收益凭证（income_certificate）的 LCR 影响计算
-
-    判断是否为浮动收益凭证（含内嵌衍生品）：otc.stress_loss 不为 None
-    """
-    V = otc.funds_raised if otc.funds_raised is not None else otc.notional
-    is_floating = otc.stress_loss is not None
-
-    # --- ΔHQLA ---
-    # 募集资金 V 带来 100% HQLA（全部货币资金流入），再减去对冲占用现金 + 补偿折算
-    hqla_change = V
-    hqla_change += _calc_hedge_hqla(hedge_list)
-
-    # --- ΔOutflow ---
-    cof_change = 0.0
-
-    # 债务本金部分：若 T ≤ 30 天，到期需偿还全部本金 → 100% 流出
-    if otc.term_days <= 30:
-        cof_change += V
-
-    # 内嵌期权部分（仅浮动收益凭证）
-    if is_floating:
-        loss = otc.stress_loss if otc.stress_loss is not None else 0.0
-        s_short = max(5 * loss, otc.notional * 0.005)
-        cof_change += s_short * 0.20
-
-    # 交易端对冲工具自身的资金流出
-    cof_change += _calc_hedge_outflow(hedge_list)
-
-    return {"hqla_change": hqla_change, "net_cof_change": cof_change}
+    # counted <= 15%*(other+counted)，等价于 counted <= 15%/85%*other。
+    cap_amount = max(0.0, other_new) * 0.15 / 0.85
+    counted_new = min(raw_new, cap_amount)
+    return other_new + counted_new - total_base
 
 
-def calc_lcr_impact(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str, float]:
-    """
-    计算对 LCR（流动性覆盖率）的影响
+def _net_outflow(outflow: float, inflow: float) -> float:
+    return outflow - min(inflow, 0.75 * outflow)
 
-    【LCR = HQLA / 未来30日现金净流出 ≥ 100%】
-      HQLA = High Quality Liquid Assets（优质流动性资产）
-      ΔLCR = (HQLA_base + ΔHQLA) / (Outflow_base + ΔOutflow) - LCR_base
 
-    三种产品分别有独立的计算逻辑：
-      1. 场外期权（call_option / put_option）
-      2. 收益互换（equity_swap）
-      3. 收益凭证（income_certificate）
+def _calc_net_cof_change(
+    gross_outflow_change: float, gross_inflow_change: float = 0.0
+) -> float:
+    firm = DEFAULT_CONFIG["firm"]
+    outflow_base = firm.get("LCR_outflow_base", firm["LCR_COF_base"]) / 10000
+    inflow_base = firm.get("LCR_inflow_base", 0.0) / 10000
+    old = _net_outflow(outflow_base, inflow_base)
+    new = _net_outflow(
+        outflow_base + gross_outflow_change,
+        inflow_base + gross_inflow_change,
+    )
+    return new - old
 
-    Returns:
-        {"hqla_change": ΔHQLA（万元）, "net_cof_change": Δ未来30日现金净流出（万元）}
-    """
-    ct = otc.contract_type
 
-    if ct in ("call_option", "put_option"):
+def _finish_result(
+    client_hqla_cash: float,
+    client_outflow: float,
+    contract_type: str,
+    hedge_list: List[HedgeTrade],
+) -> Dict[str, float]:
+    hedge_hqla = _calc_hedge_hqla(contract_type, hedge_list)
+    non_equity_change = client_hqla_cash + hedge_hqla["non_equity_change"]
+    equity_raw_change = hedge_hqla["equity_raw_change"]
+    gross_outflow_change = client_outflow + _calc_hedge_outflow(hedge_list)
+    hqla_change = _apply_equity_hqla_cap(non_equity_change, equity_raw_change)
+    net_cof_change = _calc_net_cof_change(gross_outflow_change)
+    return {
+        "hqla_change": hqla_change,
+        "hqla_non_equity_change": non_equity_change,
+        "hqla_equity_raw_change": equity_raw_change,
+        "gross_outflow_change": gross_outflow_change,
+        "gross_inflow_change": 0.0,
+        "net_cof_change": net_cof_change,
+    }
+
+
+def _calc_option_lcr(
+    otc: OtcContract, hedge_list: List[HedgeTrade]
+) -> Dict[str, float]:
+    outflow = (
+        otc.notional * LCR_OUTFLOW_RATES["otc_short_option"]
+        if otc.direction == "short"
+        else 0.0
+    )
+    return _finish_result(
+        otc.get_otc_cash_inflow(), outflow, otc.contract_type, hedge_list
+    )
+
+
+def _calc_swap_lcr(
+    otc: OtcContract, hedge_list: List[HedgeTrade]
+) -> Dict[str, float]:
+    return _finish_result(
+        otc.get_otc_cash_inflow(),
+        otc.notional * LCR_OUTFLOW_RATES["equity_swap"],
+        otc.contract_type,
+        hedge_list,
+    )
+
+
+def _calc_income_cert_lcr(
+    otc: OtcContract, hedge_list: List[HedgeTrade]
+) -> Dict[str, float]:
+    funds = otc.funds_raised if otc.funds_raised is not None else otc.notional
+    outflow = funds if otc.term_days <= 30 else 0.0
+    if otc.has_embedded_option:
+        outflow += (otc.embedded_option_notional or otc.notional) * LCR_OUTFLOW_RATES[
+            "otc_short_option"
+        ]
+    return _finish_result(funds, outflow, otc.contract_type, hedge_list)
+
+
+def calc_lcr_impact(
+    otc: OtcContract, hedge_list: List[HedgeTrade]
+) -> Dict[str, float]:
+    """返回HQLA、毛流出及执行75%流入上限后的净流出边际变化。"""
+    if otc.contract_type in ("call_option", "put_option"):
         return _calc_option_lcr(otc, hedge_list)
-    elif ct == "equity_swap":
+    if otc.contract_type == "equity_swap":
         return _calc_swap_lcr(otc, hedge_list)
-    elif ct == "income_certificate":
+    if otc.contract_type == "income_certificate":
         return _calc_income_cert_lcr(otc, hedge_list)
-    else:
-        return {"hqla_change": 0.0, "net_cof_change": 0.0}
+    return _finish_result(0.0, 0.0, otc.contract_type, hedge_list)
