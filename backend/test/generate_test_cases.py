@@ -1,8 +1,7 @@
 # ============================================================
-# backend/test/generate_test_cases.py
-# 生成典型业务测试样例并写入 test_cases.md
+# backend/test/generate_test_cases.py - 样例生成脚本（生成典型业务用例并写入 test_cases.md）
 # ============================================================
-"""运行：cd risk_cal2 && python -m backend.test.generate_test_cases"""
+# 运行：python -m backend.test.generate_test_cases
 
 import sys
 import os
@@ -13,8 +12,8 @@ from typing import Dict, Any, List
 
 # 可选：如需用真实 iFinD 数据生成 TC02/TC08/TC10，可在本机临时填写；
 # 提交或发送代码前务必保持为空。留空时脚本使用既有 Mock 路径，仍生成全部11例。
-IFIND_USER_NAME = "glzq703"
-IFIND_PASSWORD = "96998XuY"
+IFIND_USER_NAME = ""
+IFIND_PASSWORD = ""
 if IFIND_USER_NAME and IFIND_PASSWORD:
     os.environ["IFIND_USER_NAME"] = IFIND_USER_NAME
     os.environ["IFIND_PASSWORD"] = IFIND_PASSWORD
@@ -425,6 +424,160 @@ TEST_CASES: List[Dict[str, Any]] = [
         ],
         "ifind_trigger": ["get_onsite_option_greeks(INVALID_OPTION, 'delta') -> None -> fallback"],
     },
+    {
+        "id": "TC12",
+        "name": "ETF标的卖出期权 + 两只成份股篮子对冲（组合相关性判定）",
+        "scenario": "卖出沪深300ETF期权后，用两只境内指数成份股组成股票篮子对冲。公司业务范围允许ETF标的使用个股；系统先按头寸Delta权重合成归一化篮子价格，再检验篮子与ETF过去一年相关性及组合Delta比例。",
+        "client": {
+            "contract_type": "call_option",
+            "direction": "short",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_instrument": "etf",
+            "underlying_market": "CN",
+            "underlying_name": "沪深300ETF",
+            "underlying_code": "510300.SH",
+            "option_type": "call_option",
+            "premium_rate": 5.0,
+            "option_delta": -0.80,
+            "stress_loss": 200.0,
+            "expected_yield": 0.08,
+            "term_days": 180,
+        },
+        "hedges": [
+            {
+                "tool_type": "stock",
+                "direction": "long",
+                "notional": 5000.0,
+                "stock_type": "index_component",
+                "underlying_type": "index_component",
+                "underlying_market": "CN",
+                "underlying_name": "ETF成份股A",
+                "underlying_code": "600000.SH",
+            },
+            {
+                "tool_type": "stock",
+                "direction": "long",
+                "notional": 3000.0,
+                "stock_type": "index_component",
+                "underlying_type": "index_component",
+                "underlying_market": "CN",
+                "underlying_name": "ETF成份股B",
+                "underlying_code": "000001.SZ",
+            },
+        ],
+        "ifind_trigger": [
+            "get_underlying_price_series(510300.SH)",
+            "get_underlying_price_series(600000.SH)",
+            "get_underlying_price_series(000001.SZ)",
+            "calculate ETF/stock-basket correlation",
+        ],
+    },
+    {
+        "id": "TC13",
+        "name": "买入ETF看跌期权 + 卖出场内看跌期权（验证15%最终填列额）",
+        "scenario": "客户端买入ETF看跌期权形成负Delta，交易端卖出同标的场内看跌期权形成正Delta。重点验证卖出场内期权的LCR和NSFR均以Delta金额×15%作为最终填列额，不再二次乘20%或12%。",
+        "client": {
+            "contract_type": "put_option",
+            "direction": "buy",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_instrument": "etf",
+            "underlying_market": "CN",
+            "underlying_name": "上证50ETF",
+            "underlying_code": "510050.SH",
+            "option_type": "put_option",
+            "premium_rate": 3.0,
+            "option_delta": -0.50,
+            "expected_yield": 0.05,
+            "term_days": 90,
+        },
+        "hedges": [
+            {
+                "tool_type": "onsite_option",
+                "direction": "short",
+                "notional": 10000.0,
+                "option_type": "put_option",
+                "option_delta": 0.50,
+                "option_premium": 200.0,
+                "option_margin": 1500.0,
+                "tool_code": "",
+                "underlying_name": "50ETF场内看跌期权",
+                "underlying_code": "510050.SH",
+            },
+        ],
+    },
+    {
+        "id": "TC14",
+        "name": "卖出ETF期权 + 单一私募基金（无核验Delta、期限未知）",
+        "scenario": "用一对一私募基金/SPV配置对冲，但没有经核验的基金组合Delta且资产期限未知。模型不得认定有效对冲；市场风险按单一产品50%计提，NSFR按期限不明的其他资产100%计提。",
+        "client": {
+            "contract_type": "call_option",
+            "direction": "short",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_instrument": "etf",
+            "underlying_market": "CN",
+            "underlying_name": "沪深300ETF",
+            "underlying_code": "510300.SH",
+            "option_type": "call_option",
+            "premium_rate": 5.0,
+            "option_delta": -0.50,
+            "stress_loss": 200.0,
+            "expected_yield": 0.08,
+            "term_days": 180,
+        },
+        "hedges": [
+            {
+                "tool_type": "private_fund",
+                "direction": "long",
+                "notional": 5000.0,
+                "subscription_amount": 5000.0,
+                "fund_structure": "single_product",
+                "asset_maturity_days": None,
+                "fund_delta": None,
+                "underlying_market": "CN",
+                "underlying_name": "单一私募基金/SPV",
+                "underlying_code": "510300.SH",
+            },
+        ],
+    },
+    {
+        "id": "TC15",
+        "name": "卖出ETF期权 + 场外买入期权背对背（含年化平盘成本）",
+        "scenario": "客户端卖出ETF期权，交易端向平盘方买入同标的场外期权，Delta完全反向。验证场外期权平盘按期权口径计提、首日仅计预付金，并从预期创收中扣除年化平盘费率。",
+        "client": {
+            "contract_type": "call_option",
+            "direction": "short",
+            "notional": 10000.0,
+            "underlying_type": "index_component",
+            "underlying_instrument": "etf",
+            "underlying_market": "CN",
+            "underlying_name": "沪深300ETF",
+            "underlying_code": "510300.SH",
+            "option_type": "call_option",
+            "premium_rate": 5.0,
+            "option_delta": -0.50,
+            "stress_loss": 200.0,
+            "expected_yield": 0.08,
+            "term_days": 180,
+        },
+        "hedges": [
+            {
+                "tool_type": "otc_hedge",
+                "otc_hedge_contract_type": "option",
+                "direction": "long",
+                "notional": 10000.0,
+                "option_type": "call_option",
+                "option_delta": 0.50,
+                "otc_payment": 300.0,
+                "pass_through_fee": 1.0,
+                "underlying_market": "CN",
+                "underlying_name": "沪深300ETF场外平盘期权",
+                "underlying_code": "510300.SH",
+            },
+        ],
+    },
 ]
 
 
@@ -446,8 +599,16 @@ FIELD_CN: Dict[str, str] = {
     "underlying_code": "标的代码",
     "underlying_name": "标的名称",
     "underlying_type": "标的类型",
+    "underlying_instrument": "标的形态",
+    "underlying_market": "标的市场",
     "margin_rate": "保证金率",
     "cash_spent": "现金支出",
+    "fund_structure": "基金结构",
+    "fund_delta": "基金组合Delta",
+    "asset_maturity_days": "资产剩余期限/天",
+    "otc_hedge_contract_type": "场外平盘合约类型",
+    "otc_payment": "场外平盘预付金",
+    "pass_through_fee": "年化平盘费率",
     "tool_type": "工具类型",
     "futures_margin": "期货保证金",
     "stock_type": "股票类型",
@@ -761,15 +922,27 @@ def _explain_case(case: Dict[str, Any], result: Dict[str, Any]) -> str:
         h.get("tool_type") == "onsite_option" and h.get("direction") == "short"
         for h in case["hedges"]
     )
-    has_otc_back = any(h.get("tool_type") == "otc_hedge" for h in case["hedges"])
-    if has_futures or has_onsite_short or has_otc_back:
+    otc_outflow_hedges = [
+        h for h in case["hedges"]
+        if h.get("tool_type") == "otc_hedge"
+        and (
+            h.get("otc_hedge_contract_type") == "equity_swap"
+            or (
+                h.get("otc_hedge_contract_type") == "option"
+                and h.get("direction") == "short"
+            )
+        )
+    ]
+    if has_futures or has_onsite_short or otc_outflow_hedges:
         detail = []
         if has_futures:
             detail.append("股指期货按名义价值 × 20% 计提资金流出")
         if has_onsite_short:
             detail.append("卖出场内期权按 Delta金额 × 15% 作为最终填列额，不再乘20%")
-        if has_otc_back:
+        if any(h.get("otc_hedge_contract_type") == "equity_swap" for h in otc_outflow_hedges):
             detail.append("场外背对背互换按名义本金 × 0.2% 计提资金流出")
+        if any(h.get("otc_hedge_contract_type") == "option" for h in otc_outflow_hedges):
+            detail.append("场外背对背卖出期权按名义本金 × 20% 计提资金流出")
         notes.append("- 交易端衍生品对冲已按 LCR 口径计入自营资金流出（" + "；".join(detail) + "）。")
 
     # 6. iFinD 提示

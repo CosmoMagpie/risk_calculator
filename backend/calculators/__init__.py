@@ -1,5 +1,5 @@
 # ============================================================
-# backend/calculators/__init__.py
+# backend/calculators/__init__.py - 计算模块包统一导出（风险资本、LCR、NSFR、杠杆率等）
 # ============================================================
 
 from .lcr import calc_lcr_impact

@@ -1,8 +1,8 @@
-"""公司业务范围与对冲工具约束。
-
-这些约束与监管“有效对冲”判定分开：一笔交易可能在Delta/相关性上满足
-监管条件，但仍不在公司的牌照或内部可用工具范围内。
-"""
+# ============================================================
+# backend/calculators/business_validator.py - 公司业务范围与对冲工具约束校验
+# ============================================================
+# 这些约束与监管"有效对冲"判定分开：一笔交易可能在 Delta/相关性上满足
+# 监管条件，但仍不在公司的牌照或内部可用工具范围内。
 
 from typing import Dict, List
 
@@ -29,9 +29,23 @@ def validate_business_constraints(
         if hedge_market not in DOMESTIC_MARKETS:
             errors.append(f"对冲工具#{index}为境外市场工具，不在公司业务范围内")
 
-        # 用户明确的公司约束：不得用个股现货对冲股权衍生品。
+        # 公司业务约束：只有客户端场外期权的标的形态明确为境内ETF时，
+        # 才允许使用境内个股/股票篮子对冲。允许使用不等于监管有效对冲，
+        # 相关性和Delta比例仍由 hedge_validator 另行判断。
         if hedge.tool_type == "stock":
-            errors.append(f"对冲工具#{index}为个股现货，公司当前不允许个股对冲")
+            is_etf_option = (
+                otc.contract_type in ("call_option", "put_option")
+                and otc.underlying_instrument == "etf"
+            )
+            if not is_etf_option:
+                errors.append(
+                    f"对冲工具#{index}为个股现货；公司仅允许其对冲ETF标的场外期权"
+                )
+            else:
+                warnings.append(
+                    f"对冲工具#{index}为ETF标的业务的个股对冲头寸；"
+                    "须以股票篮子整体相关性和组合Delta判断是否构成监管有效对冲"
+                )
 
         if hedge.tool_type == "etf" and not hedge.is_broad_based_etf:
             warnings.append(

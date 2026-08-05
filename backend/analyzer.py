@@ -1,8 +1,8 @@
 # ============================================================
-# backend/analyzer.py - 主编排函数：串联所有子计算，输出完整指标变动报告
+# backend/analyzer.py - 统一计算编排入口（串联各计算模块，输出完整指标变动报告）
 # ============================================================
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from .models.client_contract import OtcContract
 from .models.hedge_trade import HedgeTrade
@@ -77,7 +77,7 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     net_capital_change = calc_nc_impact(otc, hedge_list)
     equity_scale_change = calc_self_operated_equity_scale(otc, hedge_list)
 
-    # ===== 步骤4：LCR影响 ====="
+    # ===== 步骤4：LCR影响 =====
     lcr = calc_lcr_impact(otc, hedge_list)
 
     # ===== 步骤5：NSFR影响 =====
@@ -104,7 +104,9 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     asf_new = DEFAULT_CONFIG["firm"]["ASF_base"] / 10000 + nsfr["asf_change"]
     rsf_new = DEFAULT_CONFIG["firm"]["RSF_base"] / 10000 + nsfr["rsf_change"]
     nsfr_new = asf_new / rsf_new if rsf_new > 0 else 999
-    nsfr_old = (DEFAULT_CONFIG["firm"]["ASF_base"] / 10000) / (DEFAULT_CONFIG["firm"]["RSF_base"] / 10000)
+    nsfr_old = (DEFAULT_CONFIG["firm"]["ASF_base"] / 10000) / (
+        DEFAULT_CONFIG["firm"]["RSF_base"] / 10000
+    )
 
     # --- 资本杠杆率 ---
     # 杠杆率 = 核心净资本 / 表内外资产总额 ≥ 8%
@@ -117,12 +119,19 @@ def analyze_contract(otc: OtcContract, hedge_list: List[HedgeTrade]) -> Dict[str
     core_nc_adjusted = core_nc + net_capital_change
     ta_base = DEFAULT_CONFIG["firm"]["on_off_balance_total_asset_base"] / 10000
     leverage_old = core_nc / ta_base if ta_base > 0 else 999
-    leverage_new = core_nc_adjusted / (ta_base + assets_change) if (ta_base + assets_change) > 0 else 999
+    leverage_new = (
+        core_nc_adjusted / (ta_base + assets_change)
+        if (ta_base + assets_change) > 0
+        else 999
+    )
 
     # --- 风险覆盖率 ---
     # 风险覆盖率 = (净资本 + Δ净资本) / (各项风险资本准备 + 新增风险资本准备)
     # 保证金占用会扣减净资本，因此分子需要加入 Δ净资本 调整
-    risk_reserve_new = DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000 + new_risk_reserve
+    risk_reserve_new = (
+        DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000
+        + new_risk_reserve
+    )
     risk_old = nc / (DEFAULT_CONFIG["firm"]["total_risk_reserve_base"] / 10000)
     risk_new = nc_adjusted / risk_reserve_new if risk_reserve_new > 0 else 999
     equity_scale_base = DEFAULT_CONFIG["firm"].get(

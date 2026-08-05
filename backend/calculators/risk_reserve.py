@@ -1,5 +1,5 @@
 # ============================================================
-# backend/calculators/risk_reserve.py - 风险资本准备计算
+# backend/calculators/risk_reserve.py - 风险资本准备计算（市场风险 + 信用风险）
 # ============================================================
 
 from typing import List
@@ -94,7 +94,9 @@ def _get_client_investment_scale(otc: OtcContract) -> float:
     return 0.0
 
 
-def _get_hedge_investment_scale(hedge: HedgeTrade, client_ct: str = "equity_swap") -> float:
+def _get_hedge_investment_scale(
+    hedge: HedgeTrade, client_ct: str = "equity_swap"
+) -> float:
     """
     获取单个对冲工具的投资规模 |S_hedge|
       现货/ETF: 市值 = notional
@@ -151,7 +153,9 @@ def _is_individual_stock(otc: OtcContract) -> bool:
     return otc.underlying_type not in ("index_component", "broad_based_etf", "index")
 
 
-def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equity_swap") -> float:
+def _calc_hedge_market_risk(
+    hedge_list: List[HedgeTrade], client_ct: str = "equity_swap"
+) -> float:
     """
     未达成有效对冲时，单独计算各对冲工具自身的市场风险资本准备（万元，不含 k_class）
 
@@ -186,7 +190,12 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equi
                 s_short = abs(h.option_delta or 0.5) * h.notional * 0.15
                 total += s_short * RATES["equity_short_option"]
             else:
-                premium = h.option_premium if h.option_premium is not None else h.notional * DEFAULT_CONFIG["trade"]["onsite_option_premium_rate"]
+                premium = (
+                    h.option_premium
+                    if h.option_premium is not None
+                    else h.notional
+                    * DEFAULT_CONFIG["trade"]["onsite_option_premium_rate"]
+                )
                 total += premium * RATES["equity_long_option"]
 
         elif tt == "otc_hedge":
@@ -206,7 +215,10 @@ def _calc_hedge_market_risk(hedge_list: List[HedgeTrade], client_ct: str = "equi
             # 可穿透时对单一产品执行“单一或穿透孰严”。
             amount = h.subscription_amount if h.subscription_amount is not None else 0.0
             base_rate = 0.25 if h.fund_structure == "collective_product" else 0.50
-            if h.fund_structure == "single_product" and h.fund_lookthrough_risk_rate is not None:
+            if (
+                h.fund_structure == "single_product"
+                and h.fund_lookthrough_risk_rate is not None
+            ):
                 base_rate = max(base_rate, h.fund_lookthrough_risk_rate)
             total += amount * base_rate
 
@@ -224,7 +236,9 @@ def _calc_option_market_risk(
     场外期权的市场风险资本准备（万元，不含 k_class）
     """
     s_client = _get_client_investment_scale(otc)
-    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
+    s_hedge_total = sum(
+        _get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list
+    )
 
     if is_hedge_effective and hedge_list:
         # 达成有效对冲：(|S_client| + |S_hedge|) × 5%
@@ -247,7 +261,9 @@ def _calc_swap_market_risk(
     惩罚条件：同时满足 条件A(非全额保证金) + 条件B(个股标的) → 加倍
     """
     s_client = _get_client_investment_scale(otc)  # N × 10%
-    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
+    s_hedge_total = sum(
+        _get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list
+    )
     is_penalty = _is_non_full_margin_swap(otc) and _is_individual_stock(otc)
 
     if is_hedge_effective and hedge_list:
@@ -279,13 +295,18 @@ def _calc_income_cert_market_risk(
         return _calc_hedge_market_risk(hedge_list, otc.contract_type)
 
     s_client = _get_client_investment_scale(otc)  # S_short
-    s_hedge_total = sum(_get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list)
+    s_hedge_total = sum(
+        _get_hedge_investment_scale(h, otc.contract_type) for h in hedge_list
+    )
 
     if is_hedge_effective and hedge_list:
         return (s_client + s_hedge_total) * 0.05
 
     # 未对冲：内嵌期权 + 对冲端各自独立计提
-    return s_client * RATES["equity_short_option"] + _calc_hedge_market_risk(hedge_list, otc.contract_type)  # S_short × 30%
+    return (
+        s_client * RATES["equity_short_option"]
+        + _calc_hedge_market_risk(hedge_list, otc.contract_type)
+    )
 
 
 # ============================================================

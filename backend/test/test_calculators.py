@@ -1,7 +1,7 @@
 # ============================================================
-# backend/test_calculators.py - 计算器自验证测试
+# backend/test/test_calculators.py - 计算模块单元回归测试
 # ============================================================
-"""运行：cd risk_cal2 && python -m backend.test_calculators"""
+# 运行：python -m backend.test.test_calculators
 
 import sys
 import os

@@ -2,8 +2,10 @@
 # backend/calculators/hedge_validator.py - 有效对冲判断
 # ============================================================
 
-import numpy as np
 from typing import List, Optional
+
+import numpy as np
+import pandas as pd
 
 from ..models.client_contract import OtcContract
 from ..models.hedge_trade import HedgeTrade
@@ -60,6 +62,46 @@ def _collect_deltas(
     return deltas
 
 
+def _stock_basket_correlation(
+    otc_code: str,
+    otc_price: dict,
+    stock_items: List[tuple[HedgeTrade, str]],
+    price_type: str,
+) -> tuple[float, Optional[str]]:
+    """计算ETF标的与个股/股票篮子的过去一年价格相关系数。
+
+    各股票价格先以首个有效价格归一化，再按头寸绝对Delta（股票现货即名义金额）
+    加权形成篮子价格序列，避免高价股因绝对价格较大而扭曲组合权重。
+    """
+    series_items = []
+    for hedge, code in stock_items:
+        prices = get_underlying_price_series(code, price_type)
+        values = prices.get(code, [])
+        if not values:
+            return np.nan, f"获取股票篮子成分 {code} 价格数据失败"
+        delta_amount = hedge.get_hedge_delta_amount()
+        if delta_amount is None or delta_amount == 0:
+            return np.nan, f"股票篮子成分 {code} Delta缺失"
+        series_items.append((code, values, abs(delta_amount)))
+
+    otc_values = otc_price.get(otc_code, [])
+    min_len = min([len(otc_values)] + [len(values) for _, values, _ in series_items])
+    if min_len < 2:
+        return np.nan, "ETF或股票篮子价格数据不足"
+
+    total_weight = sum(weight for _, _, weight in series_items)
+    basket = np.zeros(min_len, dtype=float)
+    for code, values, weight in series_items:
+        arr = np.asarray(values[:min_len], dtype=float)
+        if not np.all(np.isfinite(arr)) or arr[0] == 0:
+            return np.nan, f"股票篮子成分 {code} 价格数据无效"
+        basket += arr / arr[0] * (weight / total_weight)
+
+    otc_arr = np.asarray(otc_values[:min_len], dtype=float)
+    corr = pd.Series(otc_arr).corr(pd.Series(basket))
+    return (corr if corr is not None else np.nan), None
+
+
 def is_effective_hedge(
     otc: OtcContract, hedge_list: List[HedgeTrade], price_type: str = "close"
 ) -> List:
@@ -98,15 +140,34 @@ def is_effective_hedge(
             return [False, f"对冲工具#{index}未填写标的代码，不满足有效对冲条件"]
         hedge_codes.append(normalize_a_share_code(raw_code))
 
-    # 每一项对冲工具都必须逐项满足“同标的或相关系数≥95%”。旧实现只要任一
-    # 工具同标的便跳过整个组合的相关性检查，会把混入的不相关工具误判为有效。
-    different_codes = [hc for hc in hedge_codes if hc != otc_code]
-    if different_codes:
+    # ETF标的允许用个股/股票篮子对冲。篮子应作为一个组合检验相关性，而不是
+    # 要求每只成分股单独与ETF达到95%。其他工具仍逐项满足同标的或相关性≥95%。
+    stock_items = [
+        (hedge, code)
+        for hedge, code in zip(hedge_list, hedge_codes)
+        if hedge.get_tool_type() == "stock"
+    ]
+    other_different_codes = [
+        code
+        for hedge, code in zip(hedge_list, hedge_codes)
+        if hedge.get_tool_type() != "stock" and code != otc_code
+    ]
+    if stock_items or other_different_codes:
         otc_price = get_underlying_price_series(otc_code, price_type)
         if not otc_price.get(otc_code, []):
             return [False, f"获取产品标的 {otc_code} 价格数据失败"]
 
-        for hc in different_codes:
+        if stock_items:
+            corr, error = _stock_basket_correlation(
+                otc_code, otc_price, stock_items, price_type
+            )
+            if error:
+                return [False, error]
+            if np.isnan(corr) or corr < 0.95:
+                corr_text = "无法计算" if np.isnan(corr) else f"{corr:.2%}"
+                return [False, f"ETF标的 {otc_code} 与股票篮子相关性 {corr_text}，未达 95%"]
+
+        for hc in other_different_codes:
             h_price = get_underlying_price_series(hc, price_type)
             if not h_price.get(hc, []):
                 return [False, f"获取对冲工具标的 {hc} 价格数据失败"]

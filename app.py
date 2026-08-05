@@ -3,6 +3,7 @@
 # ============================================================
 import streamlit as st
 import pandas as pd
+import textwrap
 from datetime import datetime, timedelta
 from backend import ClientContract, HedgeTrade, analyze_contract, DEFAULT_CONFIG
 from backend.services.ifind_client import (
@@ -59,7 +60,7 @@ def validate_option_delta(direction, option_type_str, delta_value):
         (is_valid: bool, message: str)
     """
     if delta_value is None or delta_value == 0:
-        return False, "⚠️ **Delta 值不能为 0**，请填写有效的 Delta 金额。"
+        return False, "Delta 值不能为 0，请填写有效的 Delta 金额。"
     
     # 定义期望的 Delta 符号映射
     expected_sign_map = {
@@ -72,65 +73,189 @@ def validate_option_delta(direction, option_type_str, delta_value):
     
     is_positive = delta_value > 0
     if expected == "正" and not is_positive:
-        return False, f"⚠️ **Delta 符号警告**：{direction}{option_type_str}的 Delta 应为 **正数**，当前为负数。请检查是否填错。"
+        return False, f"Delta 符号警告：{direction}{option_type_str}的 Delta 应为 **正数**，当前为负数。请检查是否填错。"
     elif expected == "负" and is_positive:
-        return False, f"⚠️ **Delta 符号警告**：{direction}{option_type_str}的 Delta 应为 **负数**，当前为正数。请检查是否填错。"
+        return False, f"Delta 符号警告：{direction}{option_type_str}的 Delta 应为 **负数**，当前为正数。请检查是否填错。"
     else:
-        return True, "✅ Delta 符号正确"
+        return True, "Delta 符号校验正确"
+
+def render_status_badge(label, status):
+    """生成具备 SVG 图标的合规状态徽章 HTML"""
+    if status == "safe":
+        svg = '<svg style="vertical-align: -2px; margin-right: 4px;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>'
+        return f'<div class="status-badge-safe">{svg}{label}: 安全</div>'
+    elif status == "warning":
+        svg = '<svg style="vertical-align: -2px; margin-right: 4px;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>'
+        return f'<div class="status-badge-warning">{svg}{label}: 预警</div>'
+    else:
+        svg = '<svg style="vertical-align: -2px; margin-right: 4px;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'
+        return f'<div class="status-badge-danger">{svg}{label}: 危险</div>'
 
 st.set_page_config(page_title="场外衍生品风控影响测算系统", layout="wide")
+
+# ========== 注入组件层美化 CSS（完全移除页面全局背景色覆盖，使用原生背景） ==========
+st.markdown("""
+<style>
+/* 引入专业系统字体 */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* 全局字体 */
+.stApp {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* 标题样式 */
+h1, h2, h3 {
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+}
+
+/* Tab 选项卡样式 */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    padding: 4px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 40px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0 20px;
+    transition: all 0.2s ease;
+}
+
+/* 按钮样式提升 */
+.stButton > button {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+.stButton > button[kind="primary"] {
+    background: #2563eb !important;
+    border: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25) !important;
+    font-size: 1rem !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background: #1d4ed8 !important;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.38) !important;
+    transform: translateY(-1px);
+}
+
+/* 状态徽章 */
+.status-badge-safe {
+    background-color: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #166534;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.92rem;
+}
+
+.status-badge-warning {
+    background-color: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #92400e;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.92rem;
+}
+
+.status-badge-danger {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #991b1b;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.92rem;
+}
+
+[data-theme="dark"] .status-badge-safe {
+    color: #4ade80;
+}
+[data-theme="dark"] .status-badge-warning {
+    color: #fbbf24;
+}
+[data-theme="dark"] .status-badge-danger {
+    color: #f87171;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("场外衍生品业务风控影响测算系统")
 st.markdown("---")
 
 # ========== 侧边栏 ==========
 with st.sidebar:
-    st.header("iFinD 数据终端登录")
-    st.caption("有效对冲判定（标的相关性）与场内期权 Greeks 自动回填需要登录 iFinD")
+    with st.container(border=True):
+        st.header("iFinD 数据终端登录")
+        st.caption("有效对冲判定（标的相关性）与场内期权 Greeks 自动回填需要登录 iFinD")
 
-    if "ifind_user_name" not in st.session_state:
-        st.session_state["ifind_user_name"] = ""
-    if "ifind_password" not in st.session_state:
-        st.session_state["ifind_password"] = ""
-
-    ifind_user = st.text_input(
-        "iFinD 账号",
-        value=st.session_state["ifind_user_name"],
-        key="ifind_user_input",
-    )
-    ifind_pwd = st.text_input(
-        "iFinD 密码",
-        value=st.session_state["ifind_password"],
-        key="ifind_pwd_input",
-        type="password",
-    )
-    st.session_state["ifind_user_name"] = ifind_user
-    st.session_state["ifind_password"] = ifind_pwd
-
-    login_col, logout_col = st.columns(2)
-    with login_col:
-        if st.button("登录 iFinD", key="ifind_login_btn"):
-            if ifind_user and ifind_pwd:
-                set_ifind_credentials(ifind_user, ifind_pwd)
-                ok = ifind_login(force=True)
-                if ok:
-                    st.success("iFinD 登录成功")
-                else:
-                    st.error("iFinD 登录失败，请检查账号密码及终端状态")
-            else:
-                st.warning("请先填写账号和密码")
-    with logout_col:
-        if st.button("登出 iFinD", key="ifind_logout_btn"):
-            ifind_logout()
-            clear_ifind_credentials()
+        if "ifind_user_name" not in st.session_state:
             st.session_state["ifind_user_name"] = ""
+        if "ifind_password" not in st.session_state:
             st.session_state["ifind_password"] = ""
-            st.success("已登出并清空凭据")
 
-    status = get_ifind_login_status()
-    if status["logged_in"]:
-        st.info(f"iFinD 状态：已登录 ({status['user_name']})")
-    else:
-        st.caption("iFinD 状态：未登录")
+        status = get_ifind_login_status()
+        if status["logged_in"]:
+            st.info(f"iFinD 状态：已登录 ({status['user_name']})")
+            if st.button("登出 iFinD", key="ifind_logout_btn", use_container_width=True):
+                ifind_logout()
+                clear_ifind_credentials()
+                st.session_state["ifind_user_name"] = ""
+                st.session_state["ifind_password"] = ""
+                st.success("已登出并清空凭据")
+                st.rerun()
+        else:
+            ifind_user = st.text_input(
+                "iFinD 账号",
+                value=st.session_state["ifind_user_name"],
+                key="ifind_user_input",
+                placeholder="请输入iFinD账号",
+            )
+            ifind_pwd = st.text_input(
+                "iFinD 密码",
+                value=st.session_state["ifind_password"],
+                key="ifind_pwd_input",
+                type="password",
+                placeholder="请输入密码",
+            )
+            st.session_state["ifind_user_name"] = ifind_user
+            st.session_state["ifind_password"] = ifind_pwd
+
+            login_col, logout_col = st.columns(2)
+            with login_col:
+                if st.button("登录 iFinD", key="ifind_login_btn", use_container_width=True):
+                    if ifind_user and ifind_pwd:
+                        set_ifind_credentials(ifind_user, ifind_pwd)
+                        ok = ifind_login(force=True)
+                        if ok:
+                            st.success("iFinD 登录成功")
+                            st.rerun()
+                        else:
+                            st.error("iFinD 登录失败，请检查账号密码及终端状态")
+                    else:
+                        st.warning("请先填写账号和密码")
+            with logout_col:
+                if st.button("登出 iFinD", key="ifind_logout_btn", use_container_width=True):
+                    ifind_logout()
+                    clear_ifind_credentials()
+                    st.session_state["ifind_user_name"] = ""
+                    st.session_state["ifind_password"] = ""
+                    st.success("已登出并清空凭据")
+                    st.rerun()
+
+            st.caption("iFinD 状态：未登录")
 
     st.divider()
 
@@ -179,123 +304,125 @@ with st.sidebar:
         }
 
 # ========== 主区域 ==========
-tab1, tab2, tab3 = st.tabs(["📝 模块A：客户端场外合约", "🔄 模块B：交易端（对冲工具）", "📈 结果展示"])
+tab1, tab2, tab3 = st.tabs(["模块A：客户端场外合约", "模块B：交易端（对冲工具）", "模块C：计算结果与测算展示"])
 
 with tab1:
     st.subheader("客户端场外合约业务要素")
-    col1, col2 = st.columns(2)
     
-    with col1:
-        contract_type = st.selectbox("业务类型", ["场外期权", "收益互换", "收益凭证"])
-        direction_options = ["多头", "空头"] if contract_type == "收益互换" else ["发行"] if contract_type == "收益凭证" else ["买入", "卖出"]
-        direction = st.selectbox("交易方向", direction_options)
-        notional = st.number_input("名义本金/发行规模（万元）", min_value=0.0, value=1000.0, step=100.0)
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
         
-        # 预期收益与期限
-        st.caption("提示：预期年化收益率与合约期限应根据业务需求合理设置")
-        expected_yield = st.number_input("预期年化收益率（%）", min_value=0.0, value=8.0, step=0.5) / 100.0
+        with col1:
+            contract_type = st.selectbox("业务类型", ["场外期权", "收益互换", "收益凭证"])
+            direction_options = ["多头", "空头"] if contract_type == "收益互换" else ["发行"] if contract_type == "收益凭证" else ["买入", "卖出"]
+            direction = st.selectbox("交易方向", direction_options)
+            notional = st.number_input("名义本金/发行规模（万元）", min_value=0.0, value=1000.0, step=100.0)
+            
+            # 预期收益与期限
+            st.caption("提示：预期年化收益率与合约期限应根据业务需求合理设置")
+            expected_yield = st.number_input("预期年化收益率（%）", min_value=0.0, value=8.0, step=0.5) / 100.0
 
-        st.caption("请设置合约期限")
-        use_date_picker = st.checkbox(
-            "手动选择到期日和起始日", 
-            value=False,
-            help="勾选后，可通过日期选择器精确设置起止日期；不勾选则直接输入天数"
-        )
-        if use_date_picker:
-            col_date1, col_date2 = st.columns(2)
-            with col_date1:
-                begin_date = st.date_input("起始日", value=datetime.now().date(), key="begin_date")
-            with col_date2:  # 到期日必须晚于起始日
-                expiry_date = st.date_input("到期日", value=datetime.now().date() + timedelta(days=90), key="expiry_date", min_value=begin_date + timedelta(days=1))
-            term_days = (expiry_date - begin_date).days
-            # 显示计算出的期限
-            if term_days > 0:
-                st.info(f"📆 合约期限：**{term_days} 天**（约 {term_days/30:.1f} 个月）")
-            else:
-                st.warning("⚠️ 到期日必须晚于起始日，请重新选择")
-        else:
-            term_days = st.number_input(
-                "合约期限（天）", 
-                min_value=1, 
-                value=90, 
-                step=1,
-                help="输入合约存续天数"
+            st.caption("请设置合约期限")
+            use_date_picker = st.checkbox(
+                "手动选择到期日和起始日",
+                value=False,
+                help="勾选后，可通过日期选择器精确设置起止日期；不勾选则直接输入天数"
             )
-            begin_date = None
-            expiry_date = None
-            
-            # 显示天数对应的约几个月
-            st.caption(f" 约 {term_days/30:.1f} 个月")
-    
-    with col2:
-        # --- 默认值（所有分支均需初始化）---
-        premium_rate = None
-        margin_rate = None
-        funds_raised = None
-        stress_loss = None
-        option_delta = None
-        underlying_type = "index_component"
-        underlying_instrument = "index"
-        has_embedded_option = False
-        embedded_option_notional = None
-
-        # 期权类型（仅场外期权）
-        client_option_type = None
-        if "期权" in contract_type:
-            client_option_type = st.selectbox("期权类型", ["看涨期权", "看跌期权"])
-            premium_rate = st.number_input("权利金比例（%）", min_value=0.0, value=5.0, step=0.5)
-            # ---- Delta 输入（带符号校验）----
-                # 计算建议的 Delta 默认值（带正确符号）
-            suggested_delta = DEFAULT_CONFIG['client']['atm_option_delta']
-            if client_option_type == "看跌期权" and direction == "买入":
-                suggested_delta = -suggested_delta
-            elif client_option_type == "看涨期权" and direction == "卖出":
-                suggested_delta = -suggested_delta
-            # 买入看涨 / 卖出看跌 保持正数
-            option_delta = st.number_input("Delta（系数，如 0.50=50%）", value=suggested_delta, key="client_option_delta", 
-                                           help="期权价格对标的资产价格的敏感度，非百分比。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。如 50% Delta 请填入 0.50")
-            # ========== Delta 符号校验 ==========
-            delta_valid, delta_warning_msg = validate_option_delta(direction, client_option_type, option_delta)
-            expected_sign_map = {
-                ("买入", "看涨期权"): "正",
-                ("卖出", "看涨期权"): "负",
-                ("买入", "看跌期权"): "负",
-                ("卖出", "看跌期权"): "正",
-            }
-            expected = expected_sign_map.get((direction, client_option_type), "未知")
-            if delta_valid:
-                st.success(delta_warning_msg)
+            if use_date_picker:
+                col_date1, col_date2 = st.columns(2)
+                with col_date1:
+                    begin_date = st.date_input("起始日", value=datetime.now().date(), key="begin_date")
+                with col_date2:  # 到期日必须晚于起始日
+                    expiry_date = st.date_input("到期日", value=datetime.now().date() + timedelta(days=90), key="expiry_date", min_value=begin_date + timedelta(days=1))
+                term_days = (expiry_date - begin_date).days
+                # 显示计算出的期限
+                if term_days > 0:
+                    st.info(f"合约期限：**{term_days} 天**（约 {term_days/30:.1f} 个月）")
+                else:
+                    st.warning("到期日必须晚于起始日，请重新选择")
             else:
-                st.error(delta_warning_msg)
+                term_days = st.number_input(
+                    "合约期限（天）",
+                    min_value=1,
+                    value=90,
+                    step=1,
+                    help="输入合约存续天数"
+                )
+                begin_date = None
+                expiry_date = None
 
-            st.caption(f"提示：{direction}{client_option_type}的 Delta 期望符号为 **{expected}**")
-            if direction == "卖出": 
-                st.caption("📌 压力损失 = 标的资产价格±20%的极端情况下，当前期权持仓的最大亏损")
-                stress_loss = st.number_input("压力损失（万元）", value=notional * 0.1, step=10.0)
-            
+                # 显示天数对应的约几个月
+                st.caption(f" 约 {term_days/30:.1f} 个月")
         
-        elif contract_type == "收益互换":
-            margin_rate = st.number_input("保证金/预付金比例（%）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
-            delta_amount = None
+        with col2:
+            # --- 默认值（所有分支均需初始化）---
+            premium_rate = None
+            margin_rate = None
+            funds_raised = None
             stress_loss = None
-        
-        else:  # 收益凭证
-            funds_raised = st.number_input("募集资金总额（万元）", value=notional, step=100.0)
-            delta_amount = None
-            certificate_structure = st.selectbox("凭证结构", ["固定收益凭证", "含内嵌权益期权"])
-            has_embedded_option = certificate_structure == "含内嵌权益期权"
-            if has_embedded_option:
-                embedded_option_notional = st.number_input("内嵌期权实际名义金额（万元）", value=notional, step=100.0)
-                stress_loss = st.number_input("内嵌期权±20%压力最大损失（万元）", value=notional * 0.1, step=10.0)
-    
+            option_delta = None
+            underlying_type = "index_component"
+            underlying_instrument = "index"
+            has_embedded_option = False
+            embedded_option_notional = None
+
+            # 期权类型（仅场外期权）
+            client_option_type = None
+            if "期权" in contract_type:
+                client_option_type = st.selectbox("期权类型", ["看涨期权", "看跌期权"])
+                premium_rate = st.number_input("权利金比例（%）", min_value=0.0, value=5.0, step=0.5)
+                # ---- Delta 输入（带符号校验）----
+                # 计算建议的 Delta 默认值（带正确符号）
+                suggested_delta = DEFAULT_CONFIG['client']['atm_option_delta']
+                if client_option_type == "看跌期权" and direction == "买入":
+                    suggested_delta = -suggested_delta
+                elif client_option_type == "看涨期权" and direction == "卖出":
+                    suggested_delta = -suggested_delta
+                # 买入看涨 / 卖出看跌 保持正数
+                option_delta = st.number_input("Delta（系数，如 0.50=50%）", value=suggested_delta, key="client_option_delta",
+                                               help="期权价格对标的资产价格的敏感度，非百分比。买入看涨/卖出看跌应为正，买入看跌/卖出看涨应为负。如 50% Delta 请填入 0.50")
+                # ========== Delta 符号校验 ==========
+                delta_valid, delta_warning_msg = validate_option_delta(direction, client_option_type, option_delta)
+                expected_sign_map = {
+                    ("买入", "看涨期权"): "正",
+                    ("卖出", "看涨期权"): "负",
+                    ("买入", "看跌期权"): "负",
+                    ("卖出", "看跌期权"): "正",
+                }
+                expected = expected_sign_map.get((direction, client_option_type), "未知")
+                if delta_valid:
+                    st.success(delta_warning_msg)
+                else:
+                    st.error(delta_warning_msg)
+
+                st.caption(f"提示：{direction}{client_option_type}的 Delta 期望符号为 **{expected}**")
+                if direction == "卖出":
+                    st.caption("提示：压力损失 = 标的资产价格±20%的极端情况下，当前期权持仓的最大亏损")
+                    stress_loss = st.number_input("压力损失（万元）", value=notional * 0.1, step=10.0)
+
+
+            elif contract_type == "收益互换":
+                margin_rate = st.number_input("保证金/预付金比例（%）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
+                delta_amount = None
+                stress_loss = None
+
+            else:  # 收益凭证
+                funds_raised = st.number_input("募集资金总额（万元）", value=notional, step=100.0)
+                delta_amount = None
+                certificate_structure = st.selectbox("凭证结构", ["固定收益凭证", "含内嵌权益期权"])
+                has_embedded_option = certificate_structure == "含内嵌权益期权"
+                if has_embedded_option:
+                    embedded_option_notional = st.number_input("内嵌期权实际名义金额（万元）", value=notional, step=100.0)
+                    stress_loss = st.number_input("内嵌期权±20%压力最大损失（万元）", value=notional * 0.1, step=10.0)
+
     # ---- 标的资产信息（所有产品类型共用）----
-    st.divider()
-    st.caption("标的资产代码用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
-    underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="client_ul_code")
-    if contract_type != "收益凭证" or has_embedded_option:
-        instrument_cn = st.selectbox("标的形态", ["境内指数", "境内ETF", "境内个股"])
-        underlying_instrument = {"境内指数": "index", "境内ETF": "etf", "境内个股": "stock"}[instrument_cn]
-        underlying_type = "general_stock" if underlying_instrument == "stock" else "index_component"
+    with st.container(border=True):
+        st.caption("标的资产代码用于有效对冲判定：填写后系统将通过代码判定标的一致性；留空则按最保守方式估算")
+        underlying_code = st.text_input("标的代码", placeholder="如：000300.SH", key="client_ul_code")
+        if contract_type != "收益凭证" or has_embedded_option:
+            instrument_cn = st.selectbox("标的形态", ["境内指数", "境内ETF", "境内个股"])
+            underlying_instrument = {"境内指数": "index", "境内ETF": "etf", "境内个股": "stock"}[instrument_cn]
+            underlying_type = "general_stock" if underlying_instrument == "stock" else "index_component"
 
     # ---- 场外期权压力损失估算辅助字段 ----
     option_margin_amount = None
@@ -304,7 +431,6 @@ with tab1:
     contract_multiplier = None
     contract_size = None
     if "期权" in contract_type and direction == "卖出":
-        st.divider()
         st.caption("场外保证金不能直接按交易所期货（期权）保证金100%扣减净资本；需另行确认会计科目。")
         with st.expander("压力损失估算参数（可选）", expanded=False):
             col_e1, col_e2, col_e3 = st.columns(3)
@@ -358,28 +484,42 @@ with tab1:
 with tab2:
     st.subheader("对冲工具列表")
     
-    with st.expander("📋 标的资产分类"):
-        st.markdown("""
+    with st.expander("标的资产分类与扣减规则"):
+        st.markdown(textwrap.dedent("""
         | 资产分类 | 市场风险资本准备 | NSFR RSF | HQLA折算率 |
-        |---------|------|--------|--------|-----------|
+        |---|---|---|---|
         | **宽基股票指数ETF** | 指数基金5% | 10% | 50%（另受HQLA 15%上限约束） |
         | **其他权益ETF** | 其他权益类基金10% | 20% | 0% |
-        """)
-        st.caption("公司当前不允许使用个股现货对冲；用于对冲权益互换的ETF不计入HQLA。")
+        | **指数成份股** | 8% | 30% | 50%（另受HQLA 15%上限约束） |
+        | **一般/受限/其他股票** | 25%/50%/80% | 50%/100%/100% | 0% |
+        """))
+        st.caption("个股现货仅可用于ETF标的场外期权，并须按股票篮子整体相关性与组合Delta验证有效对冲；用于对冲权益互换的证券不计入HQLA。")
     
     if 'hedge_tools' not in st.session_state:
         st.session_state['hedge_tools'] = []
     
-    with st.expander("➕ 新增对冲工具"):
+    with st.expander("新增对冲工具", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
+            client_instrument = st.session_state.get("client_params", {}).get(
+                "underlying_instrument"
+            )
+            client_contract_type = st.session_state.get("client_params", {}).get(
+                "contract_type"
+            )
+            tool_options = ["ETF现货", "场内期货", "场内期权", "场外背对背对冲", "私募基金"]
+            if (
+                client_instrument == "etf"
+                and client_contract_type in ("call_option", "put_option")
+            ):
+                tool_options.insert(1, "个股")
             tool_type = st.selectbox(
                 "工具类型",
-                ["ETF现货", "场内期货", "场内期权", "场外背对背对冲", "私募基金"],
+                tool_options,
                 key="new_tool_type"
             )
             tool_direction = st.selectbox("方向", ["买入", "卖出"], key="new_tool_dir")
-            st.caption("💡 对冲方向应与场外合约敞口相反。例如：客户卖出看涨期权（空头敞口），对冲工具应选「买入」")
+            st.caption("提示：对冲方向应与场外合约敞口相反。例如：客户卖出看涨期权（空头敞口），对冲工具应选「买入」")
             tool_notional = st.number_input("名义价值（万元）", min_value=0.0, value=500.0, key="new_tool_notional")
         
         with col2:
@@ -406,7 +546,7 @@ with tab2:
 
             
             elif tool_type == "个股":
-                st.caption("提示：一次仅能添加一支股票，如用一揽子股票对冲，需分别添加")
+                st.caption("仅适用于ETF标的场外期权。一次添加一只股票；股票篮子需逐只添加，系统按各头寸Delta权重合成篮子并检验一年相关性。")
                 stock_type_value = st.selectbox("标的资产分类",
                 ["指数成分股", "一般上市公司股票", "流动受限股票", "其他股票"],
                 key="stock_stock_type")
@@ -465,7 +605,7 @@ with tab2:
 
                 col_btn1, col_btn2 = st.columns([1, 3])
                 with col_btn1:
-                    if st.button("📡 获取 Delta", key="fetch_delta_btn",
+                    if st.button("获取 Delta", key="fetch_delta_btn",
                                  help="从 iFinD 获取该期权的实时 Delta 并自动填入下方输入框"):
                         if not option_code or not option_code.strip():
                             st.session_state["ifind_delta_msg"] = ("error", "请先填写场内期权代码")
@@ -488,18 +628,18 @@ with tab2:
                                 st.session_state["ifind_delta_msg"] = ("error", f"获取异常：{e}")
                 with col_btn2:
                     if not ifind_ok:
-                        st.caption("⚠️ 请先在侧边栏登录 iFinD，再点击按钮获取 Delta")
+                        st.caption("提示：请先在侧边栏登录 iFinD，再点击按钮获取 Delta")
 
                 # 显示状态信息
                 msg = st.session_state.get("ifind_delta_msg")
                 if msg is not None:
                     level, text = msg
                     if level == "success":
-                        st.success(f"✅ {text}")
+                        st.success(text)
                     elif level == "error":
-                        st.error(f"❌ {text}")
+                        st.error(text)
                     else:
-                        st.info(f"ℹ️ {text}")
+                        st.info(text)
 
                 # ---- Delta 输入（带符号校验）----
                 # 初始化默认值：仅在 session_state 中尚无此 key 时写入默认值
@@ -582,10 +722,10 @@ with tab2:
                 fund_delta_value = st.number_input("经核验的组合Delta（系数；未知填0）", value=0.0, step=0.05)
                 fund_delta = fund_delta_value if fund_delta_value != 0 else None
         
-        if st.button("添加到对冲列表", key="add_hedge"):
+        if st.button("添加到对冲列表", key="add_hedge", type="primary"):
             # 校验：Delta 符号是否正确
             if not delta_valid:
-                st.error(f"❌ 无法添加对冲工具：{delta_warning_msg}")
+                st.error(f"无法添加对冲工具：{delta_warning_msg}")
             else:
                 hedge = {
                     "tool_type": CN_TOOL_TYPE[tool_type],
@@ -619,38 +759,39 @@ with tab2:
                     "stock_type": CN_STOCK_TYPE.get(stock_type_value) if stock_type_value else None,
                 }
                 st.session_state['hedge_tools'].append(hedge)
-                st.success("✅ 对冲工具已添加")
+                st.success("对冲工具已成功添加")
                 st.rerun()
     
     # 展示已有对冲工具
-    if st.session_state['hedge_tools']:
-        # 反向映射：英文→中文，用于表格显示
-        REV_TOOL_TYPE = {v: k for k, v in CN_TOOL_TYPE.items() if k != "期货"}
-        REV_DIRECTION = {"buy": "买入", "short": "卖出", "long": "买入"}
-        display_data = []
-        for t in st.session_state['hedge_tools']:
-            display_data.append({
-                "工具类型": REV_TOOL_TYPE.get(t['tool_type'], t['tool_type']),
-                "方向": REV_DIRECTION.get(t['direction'], t['direction']),
-                "名义价值（万元）": t['notional'],
-                "标的代码": t.get('underlying_code', '') or '',
-            })
-        df = pd.DataFrame(display_data)
-        df.index = range(1, len(df) + 1)  # 1-based 序号
-        st.dataframe(df)
-        for idx in range(len(st.session_state['hedge_tools'])):
-            if st.button(f"🗑️ 删除 #{idx+1}", key=f"del_{idx}"):
-                st.session_state['hedge_tools'].pop(idx)
-                st.rerun()
-    else:
-        st.info("尚无对冲工具，请添加")
+    with st.container(border=True):
+        if st.session_state['hedge_tools']:
+            # 反向映射：英文→中文，用于表格显示
+            REV_TOOL_TYPE = {v: k for k, v in CN_TOOL_TYPE.items() if k != "期货"}
+            REV_DIRECTION = {"buy": "买入", "short": "卖出", "long": "买入"}
+            display_data = []
+            for t in st.session_state['hedge_tools']:
+                display_data.append({
+                    "工具类型": REV_TOOL_TYPE.get(t['tool_type'], t['tool_type']),
+                    "方向": REV_DIRECTION.get(t['direction'], t['direction']),
+                    "名义价值（万元）": t['notional'],
+                    "标的代码": t.get('underlying_code', '') or '',
+                })
+            df = pd.DataFrame(display_data)
+            df.index = range(1, len(df) + 1)  # 1-based 序号
+            st.dataframe(df, use_container_width=True)
+            for idx in range(len(st.session_state['hedge_tools'])):
+                if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
+                    st.session_state['hedge_tools'].pop(idx)
+                    st.rerun()
+        else:
+            st.info("尚无对冲工具，请在上方添加")
 
 with tab3:
     st.subheader("计算结果")
-    if st.button("计算业务影响", type="primary"):
+    if st.button("计算业务影响", type="primary", use_container_width=True):
         cp = st.session_state.get('client_params')
         if not cp:
-            st.error("请先在「模块A：场内合约端」填写业务信息")
+            st.error("请先在「模块A：客户端场外合约」填写业务信息")
         else:
             # 将侧边栏修改后的公司基准参数同步到 DEFAULT_CONFIG（万元 → 元）
             firm_params = st.session_state.get('firm_params', {})
@@ -672,85 +813,106 @@ with tab3:
                 return "不适用" if val is None or abs(val - 999.0) < 1e-6 else f"{val:.2f} 元/元"
 
             # ===== 第一层：现金流与资源消耗绝对值 =====
-            st.markdown("### 第一层：现金流与资源消耗绝对值")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("首日净现金流", f"{result['net_day1_cash']:,.2f} 万元")
-            col2.metric("新增风险资本准备", f"{result['new_risk_reserve']:,.2f} 万元")
-            col3.metric("新增未来30日现金净流出", f"{result['net_cof_change']:,.2f} 万元")
+            with st.container(border=True):
+                st.markdown("### 第一层：现金流与资源消耗绝对值")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("首日净现金流", f"{result['net_day1_cash']:,.2f} 万元")
+                col2.metric("新增风险资本准备", f"{result['new_risk_reserve']:,.2f} 万元")
+                col3.metric("新增未来30日现金净流出", f"{result['net_cof_change']:,.2f} 万元")
+
+            st.write("")
 
             # ===== 第二层：核心风控指标边际变动 =====
-            st.markdown("### 第二层：核心风控指标边际变动")
-            col1, col2, col3, col4, col5 = st.columns(5)
+            with st.container(border=True):
+                st.markdown("### 第二层：核心风控指标边际变动")
+                col1, col2, col3, col4, col5 = st.columns(5)
 
-            lcr_delta = result['lcr_change']
-            col1.metric("LCR", fmt_ratio(result['lcr_new']),
-                        delta=f"{lcr_delta:+.2%}",
-                        delta_color="inverse" if lcr_delta < 0 else "normal")
-            col1.caption(f"原值: {fmt_ratio(result['lcr_old'])} ｜ ≥100%")
+                lcr_delta = result['lcr_change']
+                col1.metric("LCR", fmt_ratio(result['lcr_new']),
+                            delta=f"{lcr_delta:+.2%}",
+                            delta_color="inverse" if lcr_delta < 0 else "normal")
+                col1.caption(f"原值: {fmt_ratio(result['lcr_old'])} ｜ ≥100%")
 
-            nsfr_delta = result['nsfr_change']
-            col2.metric("NSFR", fmt_ratio(result['nsfr_new']),
-                        delta=f"{nsfr_delta:+.2%}",
-                        delta_color="inverse" if nsfr_delta < 0 else "normal")
-            col2.caption(f"原值: {fmt_ratio(result['nsfr_old'])} ｜ ≥100%")
+                nsfr_delta = result['nsfr_change']
+                col2.metric("NSFR", fmt_ratio(result['nsfr_new']),
+                            delta=f"{nsfr_delta:+.2%}",
+                            delta_color="inverse" if nsfr_delta < 0 else "normal")
+                col2.caption(f"原值: {fmt_ratio(result['nsfr_old'])} ｜ ≥100%")
 
-            lev_delta = result['leverage_change']
-            col3.metric("资本杠杆率", fmt_ratio(result['leverage_new']),
-                        delta=f"{lev_delta:+.2%}",
-                        delta_color="inverse" if lev_delta < 0 else "normal")
-            col3.caption(f"原值: {fmt_ratio(result['leverage_old'])} ｜ ≥8%")
+                lev_delta = result['leverage_change']
+                col3.metric("资本杠杆率", fmt_ratio(result['leverage_new']),
+                            delta=f"{lev_delta:+.2%}",
+                            delta_color="inverse" if lev_delta < 0 else "normal")
+                col3.caption(f"原值: {fmt_ratio(result['leverage_old'])} ｜ ≥8%")
 
-            rc_delta = result['risk_coverage_change']
-            col4.metric("风险覆盖率", fmt_ratio(result['risk_coverage_new']),
-                        delta=f"{rc_delta:+.2%}",
-                        delta_color="inverse" if rc_delta < 0 else "normal")
-            col4.caption(f"原值: {fmt_ratio(result['risk_coverage_old'])} ｜ ≥100%")
+                rc_delta = result['risk_coverage_change']
+                col4.metric("风险覆盖率", fmt_ratio(result['risk_coverage_new']),
+                            delta=f"{rc_delta:+.2%}",
+                            delta_color="inverse" if rc_delta < 0 else "normal")
+                col4.caption(f"原值: {fmt_ratio(result['risk_coverage_old'])} ｜ ≥100%")
 
-            eq_delta = result['equity_scale_ratio_change']
-            col5.metric("自营权益规模/净资本", fmt_ratio(result['equity_scale_ratio_new']),
-                        delta=f"{eq_delta:+.2%}", delta_color="inverse" if eq_delta > 0 else "normal")
-            col5.caption(f"原值: {fmt_ratio(result['equity_scale_ratio_old'])} ｜ ≤100%")
+                eq_delta = result['equity_scale_ratio_change']
+                col5.metric("自营权益规模/净资本", fmt_ratio(result['equity_scale_ratio_new']),
+                            delta=f"{eq_delta:+.2%}", delta_color="inverse" if eq_delta > 0 else "normal")
+                col5.caption(f"原值: {fmt_ratio(result['equity_scale_ratio_old'])} ｜ ≤100%")
+
+            st.write("")
 
             # ===== 第三层：动态性价比指标 =====
-            st.markdown("### 第三层：动态性价比指标")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("ROC 资本收益率", fmt_num(result['roc']),
-                        help="预期创收 / 新增风险资本准备")
-            col2.metric("RO-LCR 流动性创收率", fmt_num(result['ro_lcr']),
-                        help="预期创收 / max(0, Δ现金净流出 - ΔHQLA)")
-            col3.metric("RO-NSFR 稳定资金创收率", fmt_num(result['ro_nsfr']),
-                        help="预期创收 / Δ所需稳定资金")
+            with st.container(border=True):
+                st.markdown("### 第三层：动态性价比指标")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("ROC 资本收益率", fmt_num(result['roc']),
+                            help="预期创收 / 新增风险资本准备")
+                col2.metric("RO-LCR 流动性创收率", fmt_num(result['ro_lcr']),
+                            help="预期创收 / max(0, Δ现金净流出 - ΔHQLA)")
+                col3.metric("RO-NSFR 稳定资金创收率", fmt_num(result['ro_nsfr']),
+                            help="预期创收 / Δ所需稳定资金")
 
-            # 对冲有效性 & 合规状态
-            st.info(f"对冲有效性: {'✅ 有效对冲' if result['is_effective_hedge'][0] else '❌ 未达有效对冲'}")
-            if not result['is_effective_hedge'][0]:
-                st.caption(f"原因: {result['is_effective_hedge'][1]}")
-            constraints = result["business_constraints"]
-            for error in constraints["errors"]:
-                st.error(f"业务范围错误：{error}")
-            for warning in constraints["warnings"]:
-                st.warning(warning)
+            st.write("")
+            st.divider()
 
-            # 调试信息：展示实际传入的标的代码与 Delta，便于排查 TC01/TC02 类问题
-            with st.expander("对冲判定详情（调试用）"):
-                hedge_codes = [h.get_tool_underlying_code() for h in hedge_list]
-                hedge_dirs = [h.get_tool_direction() for h in hedge_list]
-                st.write(f"场外合约标的代码：{repr(client.get_otc_underlying_code())}")
-                st.write(f"场外合约 Delta：{client.get_otc_delta_amount()}")
-                st.write(f"对冲工具标的代码：{[repr(c) for c in hedge_codes]}")
-                st.write(f"对冲工具方向：{hedge_dirs}")
-                for idx, h in enumerate(hedge_list, 1):
-                    st.write(f"对冲工具 #{idx} Delta：{h.get_hedge_delta_amount()}（类型={h.get_tool_type()}，方向={h.get_tool_direction()}，名义={h.get_tool_notional()}）")
-                st.write(f"有效对冲判定：{'通过' if result['is_effective_hedge'][0] else '未通过'}")
+            # ===== 对冲有效性与业务合规判定 =====
+            with st.container(border=True):
+                st.subheader("对冲有效性与业务合规判定")
+                st.info(f"对冲有效性: {'有效对冲' if result['is_effective_hedge'][0] else '未达有效对冲'}")
                 if not result['is_effective_hedge'][0]:
-                    st.write(f"未通过原因：{result['is_effective_hedge'][1]}")
+                    st.caption(f"未通过原因: {result['is_effective_hedge'][1]}")
+                constraints = result["business_constraints"]
+                for error in constraints["errors"]:
+                    st.error(f"业务范围错误：{error}")
+                for warning in constraints["warnings"]:
+                    st.warning(warning)
 
-            status_cols = st.columns(5)
-            status_cols[0].write(f"LCR: {'✅ 安全' if result['lcr_status'] == 'safe' else '⚠️ 预警' if result['lcr_status'] == 'warning' else '🚨 危险'}")
-            status_cols[1].write(f"NSFR: {'✅ 安全' if result['nsfr_status'] == 'safe' else '⚠️ 预警' if result['nsfr_status'] == 'warning' else '🚨 危险'}")
-            status_cols[2].write(f"资本杠杆率: {'✅ 安全' if result['leverage_status'] == 'safe' else '⚠️ 预警' if result['leverage_status'] == 'warning' else '🚨 危险'}")
-            status_cols[3].write(f"风险覆盖率: {'✅ 安全' if result['risk_coverage_status'] == 'safe' else '⚠️ 预警' if result['risk_coverage_status'] == 'warning' else '🚨 危险'}")
-            status_cols[4].write(f"自营权益规模: {'✅ 安全' if result['equity_scale_status'] == 'safe' else '⚠️ 预警' if result['equity_scale_status'] == 'warning' else '🚨 危险'}")
+            st.write("")
 
-            with st.expander("查看明细"):
-                st.json(result)
+            # ===== 核心风控指标合规状态汇总 =====
+            with st.container(border=True):
+                st.subheader("核心风控指标状态汇总")
+                status_cols = st.columns(5)
+                status_cols[0].markdown(render_status_badge("LCR", result['lcr_status']), unsafe_allow_html=True)
+                status_cols[1].markdown(render_status_badge("NSFR", result['nsfr_status']), unsafe_allow_html=True)
+                status_cols[2].markdown(render_status_badge("资本杠杆率", result['leverage_status']), unsafe_allow_html=True)
+                status_cols[3].markdown(render_status_badge("风险覆盖率", result['risk_coverage_status']), unsafe_allow_html=True)
+                status_cols[4].markdown(render_status_badge("自营权益规模", result['equity_scale_status']), unsafe_allow_html=True)
+
+            st.write("")
+
+            # ===== 详细明细与调试展开面板 =====
+            col_exp1, col_exp2 = st.columns(2)
+            with col_exp1:
+                with st.expander("查看明细数据"):
+                    st.json(result)
+            with col_exp2:
+                with st.expander("对冲判定详情（调试用）"):
+                    hedge_codes = [h.get_tool_underlying_code() for h in hedge_list]
+                    hedge_dirs = [h.get_tool_direction() for h in hedge_list]
+                    st.write(f"场外合约标的代码：{repr(client.get_otc_underlying_code())}")
+                    st.write(f"场外合约 Delta：{client.get_otc_delta_amount()}")
+                    st.write(f"对冲工具标的代码：{[repr(c) for c in hedge_codes]}")
+                    st.write(f"对冲工具方向：{hedge_dirs}")
+                    for idx, h in enumerate(hedge_list, 1):
+                        st.write(f"对冲工具 #{idx} Delta：{h.get_hedge_delta_amount()}（类型={h.get_tool_type()}，方向={h.get_tool_direction()}，名义={h.get_tool_notional()}）")
+                    st.write(f"有效对冲判定：{'通过' if result['is_effective_hedge'][0] else '未通过'}")
+                    if not result['is_effective_hedge'][0]:
+                        st.write(f"未通过原因：{result['is_effective_hedge'][1]}")

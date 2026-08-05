@@ -493,8 +493,10 @@ def get_onsite_option_greeks(
                     for val in reversed(values):
                         if not np.isnan(val):
                             if variant != code:
-                                print(f"[iFinD] Greeks 通过 {variant} 获取成功 "
-                                      f"(原始代码 {code} 无有效值)")
+                                print(
+                                    f"[iFinD] Greeks 通过 {variant} 获取成功 "
+                                    f"(原始代码 {code} 无有效值)"
+                                )
                             return float(val), None
 
                 except Exception as e:

@@ -1,12 +1,10 @@
-"""
-build_exe.py - 将风控测算系统打包为 Windows 可执行文件夹
-
-用法：
-    python build_exe.py
-
-输出：
-    dist/风控测算系统/风控测算系统.exe  （双击运行）
-"""
+# ============================================================
+# build_exe.py - PyInstaller 打包脚本（生成 Windows 可执行文件夹）
+# ============================================================
+# 用法：
+#   python build_exe.py
+# 输出：
+#   dist/风控测算系统/风控测算系统.exe  （双击运行）
 
 import subprocess
 import sys

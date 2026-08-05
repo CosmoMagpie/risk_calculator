@@ -1,12 +1,12 @@
 # ============================================================
-# backend/test_integration.py - 集成与模型正确性测试
+# backend/test/test_integration.py - 端到端集成与模型正确性测试
 # ============================================================
 # 覆盖：config、ClientContract、HedgeTrade、analyzer 端到端、边界情况
 # 与 test_calculators.py（纯 calculators 单元测试）互补
-# ============================================================
 
 import sys
 import math
+from unittest.mock import patch
 
 from backend.config import DEFAULT_CONFIG
 from backend.models.client_contract import OtcContract as ClientContract
@@ -576,6 +576,77 @@ def test_company_business_constraints():
           not result["business_constraints"]["is_compliant"])
     check("noncompliant hedge cannot be regulatory effective",
           result["is_effective_hedge"][0] is False)
+
+    # ETF标的期权允许用境内个股/股票篮子对冲；有效性按篮子整体相关性和总Delta判断。
+    etf_option = ClientContract(
+        contract_type="call_option", direction="short", notional=1000,
+        underlying_type="index_component", underlying_instrument="etf",
+        underlying_market="CN", underlying_code="510300.SH",
+        option_type="call_option", option_delta=-1.0,
+        premium_rate=5.0, stress_loss=20.0,
+    )
+    stock_basket = [
+        HedgeTrade(
+            tool_type="stock", direction="long", notional=600,
+            underlying_type="index_component", stock_type="index_component",
+            underlying_market="CN", underlying_code="600000.SH",
+        ),
+        HedgeTrade(
+            tool_type="stock", direction="long", notional=400,
+            underlying_type="index_component", stock_type="index_component",
+            underlying_market="CN", underlying_code="000001.SZ",
+        ),
+    ]
+
+    def correlated_prices(code, _price_type):
+        values = {
+            "510300.SH": [1.0, 2.0, 3.0, 4.0],
+            "600000.SH": [10.0, 20.0, 30.0, 40.0],
+            "000001.SZ": [20.0, 40.0, 60.0, 80.0],
+        }
+        return {code: values.get(code, [])}
+
+    with patch(
+        "backend.calculators.hedge_validator.get_underlying_price_series",
+        side_effect=correlated_prices,
+    ):
+        basket_result = analyze_contract(etf_option, stock_basket)
+    check("ETF underlying permits domestic stock basket hedge",
+          basket_result["business_constraints"]["is_compliant"])
+    check("high-correlation stock basket can be effective hedge",
+          basket_result["is_effective_hedge"][0] is True)
+
+    low_corr_stock = HedgeTrade(
+        tool_type="stock", direction="long", notional=1000,
+        underlying_type="index_component", stock_type="index_component",
+        underlying_market="CN", underlying_code="600000.SH",
+    )
+
+    def low_correlation_prices(code, _price_type):
+        values = {
+            "510300.SH": [1.0, 2.0, 3.0, 4.0],
+            "600000.SH": [1.0, 2.0, 1.0, 2.0],
+        }
+        return {code: values.get(code, [])}
+
+    with patch(
+        "backend.calculators.hedge_validator.get_underlying_price_series",
+        side_effect=low_correlation_prices,
+    ):
+        low_corr_result = analyze_contract(etf_option, [low_corr_stock])
+    check("low-correlation ETF stock hedge remains business-compliant",
+          low_corr_result["business_constraints"]["is_compliant"])
+    check("low-correlation ETF stock hedge is not regulatory effective",
+          low_corr_result["is_effective_hedge"][0] is False)
+
+    etf_swap = ClientContract(
+        contract_type="equity_swap", direction="short", notional=1000,
+        underlying_type="index_component", underlying_instrument="etf",
+        underlying_market="CN", underlying_code="510300.SH", margin_rate=10.0,
+    )
+    etf_swap_result = analyze_contract(etf_swap, [low_corr_stock])
+    check("stock hedge remains blocked for ETF equity swap",
+          not etf_swap_result["business_constraints"]["is_compliant"])
 
     overseas = ClientContract(
         contract_type="call_option", direction="short", notional=1000,

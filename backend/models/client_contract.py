@@ -1,24 +1,14 @@
 # ============================================================
-# backend/models/client_contract.py - 模块A：场外衍生品合约数据模型
+# backend/models/client_contract.py - 客户端合约数据模型（模块A：场外衍生品合约）
 # ============================================================
 
-import numpy as np          # 科学计算库，这里主要用于 np.nan（表示"非数字"）
-import pandas as pd         # 数据分析库，这里用于价格序列的相关性计算（pd.Series）
-import random               # 随机数库
-from datetime import datetime, timedelta  # 日期时间处理
-from typing import Dict, Any, Optional, List  # 类型注解工具
-from dataclasses import dataclass, field       # 数据类装饰器，自动生成构造函数等
-import math                 # 数学函数库
+from dataclasses import dataclass
+from typing import Optional
 
 from ..config import DEFAULT_CONFIG
 
 
 # ===================== 模块A：场外衍生品合约（OtcContract） =====================
-# 【Python语法】@dataclass 是装饰器，放在 class 上一行，自动生成：
-#   - __init__(self, ...)：构造函数，按字段顺序接收参数
-#   - __repr__(self)：打印对象时的可读表示
-#   省去了手写大量样板代码。字段后带 =None 或 =默认值 的是可选参数
-#
 # 【业务含义】OtcContract 代表股衍部与客户签订的一笔场外衍生品合约
 #   支持的四种业务类型（contract_type）：
 #     "call_option"   — 场外看涨期权
@@ -81,13 +71,7 @@ class OtcContract:
     begin_date: Optional[str] = None            # 合约起始日（"YYYY-MM-DD"格式）
     term_days: int = 90                         # 合约期限（天），默认90天≈3个月
 
-    # ================================================================
-    # 以下是一系列 getter 方法（getter = 获取属性值的访问器方法）
-    # 【Python语法】def method(self) -> type: 中 self 代表实例自身，必须显式写出
-    # 【设计思路】虽然 dataclass 可以直接 obj.field 访问字段，但组员写了这些 getter，
-    #           可能是为了：①统一接口风格  ②后续方便在方法内加校验逻辑
-    #           ③如果要对接框架（如 ORM），getter 模式更通用
-    # ================================================================
+    # 访问器用于保持既有调用接口稳定。
     def get_otc_contract_type(self) -> str:
         """获取合约类型"""
         return self.contract_type
@@ -214,8 +198,6 @@ class OtcContract:
           - 收益互换：本模型字段定义为“向客户收取保证金/预付金”，与多空方向无关
           - 收益凭证：券商募集资金 → 正值（融资入账）
 
-        【Python语法】if/elif/else 条件分支；self.xxx 访问实例属性；
-                       is not None 判空；三元表达式 X if 条件 else Y
         """
         # --- 期权：权利金计算有三级优先级 ---
         if (self.contract_type == "call_option" or self.contract_type == "put_option"):
@@ -260,8 +242,6 @@ class OtcContract:
         判断收益互换保证金比例是否为100%且标的资产为境内个股
 
         【监管背景】根据规定，100%保证金的个股收益互换在风险计提上有特殊处理
-        【Python语法】abs(x - y) < 0.001 是浮点数比较的惯用写法，
-                       避免浮点精度问题（不用 == 直接比较）
         """
         if self.contract_type != "equity_swap":
             return False
@@ -283,7 +263,6 @@ class OtcContract:
            - Delta金额 = Delta系数 × 名义本金，反映权益方向性风险敞口
            - 券商视角：做多标的 = 正Delta，做空标的 = 负Delta
 
-        【Python语法】is_long = 1 if ... else -1 是简洁的方向符号赋值
         """
         # 方向归一化：期权用 buy/short，互换/凭证用 long/short
         is_long = 1 if self.direction in ("long", "buy") else -1
