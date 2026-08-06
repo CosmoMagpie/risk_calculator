@@ -567,6 +567,57 @@ def get_onsite_option_underlying_code(option_code: str) -> Optional[str]:
         return None
 
 
+def get_onsite_option_type(option_code: str) -> Optional[str]:
+    """
+    获取场内期权类型（看涨/看跌，通过 iFinD API）
+
+    用于修正 iFinD 返回 Delta 的符号：不同数据源对认沽期权的 Delta
+    可能返回绝对值或带符号，需结合期权类型统一为正负号明确的头寸 Delta。
+
+    Args:
+        option_code: 期权代码（iFinD 格式，如 '10011855' 或 '10011855.SH'）
+
+    Returns:
+        str: 'call'（看涨/认购）或 'put'（看跌/认沽），失败返回 None
+    """
+    if not _IFIND_AVAILABLE:
+        return None
+    if not ifind_login():
+        return None
+
+    try:
+        result = THS_DS(
+            option_code,
+            'ths_contract_type_option',
+            '1',
+            'Days:Tradedays,Fill:Blank',
+            (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+            datetime.now().strftime('%Y-%m-%d'),
+        )
+        if result is None:
+            return None
+        if hasattr(result, 'errorcode') and result.errorcode != 0:
+            print(f"[iFinD] THS_DS 获取期权类型失败 {option_code}: {result.errorcode}, {result.errmsg}")
+            return None
+
+        data = pd.DataFrame(result.data)
+        if data.empty or 'ths_contract_type_option' not in data.columns:
+            return None
+
+        raw = data['ths_contract_type_option'].dropna().iloc[-1]
+        s = str(raw).strip().lower()
+        # iFinD 可能返回中文（认购/认沽、看涨/看跌）或英文（CALL/PUT）
+        if any(k in s for k in ("认沽", "看跌", "put")):
+            return "put"
+        if any(k in s for k in ("认购", "看涨", "call")):
+            return "call"
+        return None
+
+    except Exception as e:
+        print(f"[iFinD] 获取期权类型失败 {option_code}: {e}")
+        return None
+
+
 def _calc_bs_greek(
     S: float, K: float, r: float, T_days: int,
     greek: str, option_type: str = 'call',

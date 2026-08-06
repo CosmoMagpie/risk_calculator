@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import textwrap
 from datetime import datetime, timedelta
-from backend import ClientContract, HedgeTrade, analyze_contract, DEFAULT_CONFIG
+from backend import ClientContract, HedgeTrade, analyze_contract, DEFAULT_CONFIG, IFIND_DEFAULT_LOGIN
 from backend.services.ifind_client import (
     ifind_login,
     ifind_logout,
@@ -14,6 +14,7 @@ from backend.services.ifind_client import (
     get_ifind_login_status,
     get_onsite_option_greeks,
     get_onsite_option_underlying_code,
+    get_onsite_option_type,
 )
 
 # ========== 中英文映射字典 ==========
@@ -137,6 +138,80 @@ def _remove_temp_tool(idx: int) -> None:
         tools.pop(idx)
 
 
+def _on_option_code_change() -> None:
+    """
+    场内期权代码变化的 on_change 回调：
+    从 iFinD 自动获取标的代码与期权类型，并回填「期权类型」下拉框。
+    回调在脚本渲染前执行，可安全修改 widget 状态（st.session_state）。
+    """
+    code = st.session_state.get("new_option_code", "")
+    code = code.strip() if code else ""
+    if not code:
+        return
+    st.session_state["auto_ul_result"] = get_onsite_option_underlying_code(code)
+    fetched_type = get_onsite_option_type(code)
+    st.session_state["auto_ul_opt_type"] = fetched_type
+    if fetched_type not in ("call", "put"):
+        return
+    cn_type = "看涨期权" if fetched_type == "call" else "看跌期权"
+    if st.session_state.get("new_option_type", "") == cn_type:
+        return
+    st.session_state["new_option_type"] = cn_type
+    # 若当前 Delta 仍是通用默认值（±ATM delta），按新类型刷新默认符号，
+    # 避免类型自动修正后默认 Delta 符号与类型不匹配
+    cur_delta = st.session_state.get("new_option_delta")
+    if cur_delta is not None and abs(abs(float(cur_delta)) - DEFAULT_CONFIG['client']['atm_option_delta']) < 1e-9:
+        default_delta = DEFAULT_CONFIG['client']['atm_option_delta']
+        direction = st.session_state.get("new_tool_dir", "买入")
+        if cn_type == "看跌期权" and direction == "买入":
+            default_delta = -default_delta
+        elif cn_type == "看涨期权" and direction == "卖出":
+            default_delta = -default_delta
+        st.session_state["new_option_delta"] = default_delta
+
+
+def _on_fetch_delta() -> None:
+    """
+    「获取 Delta」按钮的 on_click 回调：
+    从 iFinD 获取期权实时 Delta，并按期权类型+交易方向修正符号后回填。
+    回调在脚本渲染前执行，可安全修改 widget 状态（st.session_state）。
+    """
+    code = st.session_state.get("new_option_code", "")
+    code = code.strip() if code else ""
+    if not code:
+        st.session_state["ifind_delta_msg"] = ("error", "请先填写场内期权代码")
+        return
+    if not get_ifind_login_status().get("logged_in", False):
+        st.session_state["ifind_delta_msg"] = ("error", "iFinD 未登录，请先在侧边栏登录 iFinD 终端")
+        return
+    direction = st.session_state.get("new_tool_dir", "买入")
+    try:
+        fetched, err_msg = get_onsite_option_greeks(code, "delta")
+        if fetched is None:
+            st.session_state["ifind_delta_msg"] = ("error", err_msg)
+            return
+        # 修正 Delta 符号：iFinD 返回的认沽 Delta 可能是绝对值或符号约定不同，
+        # 先按期权类型（看涨/看跌）确定方向符号，再叠加交易方向，得到正负号明确的头寸 Delta。
+        option_en = get_onsite_option_type(code)
+        if option_en in ("call", "put"):
+            option_sign = 1 if option_en == "call" else -1
+            direction_sign = 1 if direction == "买入" else -1
+            position_delta = option_sign * direction_sign * abs(float(fetched))
+            delta_note = "（按期权类型自动修正符号）"
+            # 回填「期权类型」下拉框，保证后续 Delta 符号校验与实际类型一致
+            st.session_state["new_option_type"] = "看涨期权" if option_en == "call" else "看跌期权"
+        else:
+            # 无法获取期权类型时，回退为原逻辑（按 iFinD 原始符号）
+            position_sign = 1 if direction == "买入" else -1
+            position_delta = position_sign * float(fetched)
+            delta_note = ""
+        st.session_state["new_option_delta"] = position_delta
+        st.session_state["ifind_delta_msg"] = ("success",
+            f"合约 Delta = {fetched:.4f}, 头寸 Delta = {position_delta:.4f}{delta_note}，已填入下方输入框")
+    except Exception as e:
+        st.session_state["ifind_delta_msg"] = ("error", f"获取异常：{e}")
+
+
 def render_tool_adder(target_list: list) -> None:
     """
     渲染「新增对冲工具」表单（沿用单方案版全部输入字段）。
@@ -237,16 +312,13 @@ def render_tool_adder(target_list: list) -> None:
             )
 
             # ---- 期权代码 → 标的代码自动判定（无需手动填写标的）----
-            option_code = st.text_input("场内期权代码", placeholder="如：10011855.SH", key="new_option_code")
+            # 标的代码与期权类型的自动获取在 _on_option_code_change 回调中完成
+            option_code = st.text_input("场内期权代码", placeholder="如：10011855.SH", key="new_option_code",
+                                        on_change=_on_option_code_change)
             ifind_ok = get_ifind_login_status().get("logged_in", False)
             if option_code and option_code.strip():
-                # 仅在代码或 iFinD 登录状态变化时查询一次，避免每次交互重复请求；
-                # 未登录时先不缓存失败结果，登录后重新输入同一代码会重新尝试
-                if (
-                    st.session_state.get("auto_ul_opt_code") != option_code.strip()
-                    or st.session_state.get("auto_ul_login") != ifind_ok
-                ):
-                    st.session_state["auto_ul_opt_code"] = option_code.strip()
+                # 登录状态变化时（如登录前后）重新获取标的，避免缓存过期结果
+                if st.session_state.get("auto_ul_login") != ifind_ok:
                     st.session_state["auto_ul_login"] = ifind_ok
                     st.session_state["auto_ul_result"] = get_onsite_option_underlying_code(
                         option_code.strip()
@@ -266,27 +338,10 @@ def render_tool_adder(target_list: list) -> None:
 
             col_btn1, col_btn2 = st.columns([1, 3])
             with col_btn1:
-                if st.button("获取 Delta", key="fetch_delta_btn",
-                             help="从 iFinD 获取该期权的实时 Delta 并自动填入下方输入框"):
-                    if not option_code or not option_code.strip():
-                        st.session_state["ifind_delta_msg"] = ("error", "请先填写场内期权代码")
-                    elif not ifind_ok:
-                        st.session_state["ifind_delta_msg"] = ("error",
-                            "iFinD 未登录，请先在侧边栏登录 iFinD 终端")
-                    else:
-                        try:
-                            fetched, err_msg = get_onsite_option_greeks(option_code.strip(), "delta")
-                            if fetched is not None:
-                                position_sign = 1 if tool_direction == "买入" else -1
-                                position_delta = position_sign * float(fetched)
-                                # 直接写入 number_input 的 key，触发界面刷新
-                                st.session_state["new_option_delta"] = position_delta
-                                st.session_state["ifind_delta_msg"] = ("success",
-                                    f"合约 Delta = {fetched:.4f}, 头寸 Delta = {position_delta:.4f}，已填入下方输入框")
-                            else:
-                                st.session_state["ifind_delta_msg"] = ("error", err_msg)
-                        except Exception as e:
-                            st.session_state["ifind_delta_msg"] = ("error", f"获取异常：{e}")
+                # 获取逻辑在 _on_fetch_delta 回调中完成（回调在渲染前执行，可安全回填 widget 状态）
+                st.button("获取 Delta", key="fetch_delta_btn",
+                          on_click=_on_fetch_delta,
+                          help="从 iFinD 获取该期权的实时 Delta 并自动填入下方输入框")
             with col_btn2:
                 if not ifind_ok:
                     st.caption("提示：请先在侧边栏登录 iFinD，再点击按钮获取 Delta")
@@ -815,9 +870,9 @@ with st.sidebar:
         st.caption("有效对冲判定（标的相关性）与场内期权 Greeks 自动回填需要登录 iFinD")
 
         if "ifind_user_name" not in st.session_state:
-            st.session_state["ifind_user_name"] = ""
+            st.session_state["ifind_user_name"] = IFIND_DEFAULT_LOGIN["username"]
         if "ifind_password" not in st.session_state:
-            st.session_state["ifind_password"] = ""
+            st.session_state["ifind_password"] = IFIND_DEFAULT_LOGIN["password"]
 
         status = get_ifind_login_status()
         if status["logged_in"]:
@@ -825,47 +880,58 @@ with st.sidebar:
             if st.button("登出 iFinD", key="ifind_logout_btn", use_container_width=True):
                 ifind_logout()
                 clear_ifind_credentials()
-                st.session_state["ifind_user_name"] = ""
-                st.session_state["ifind_password"] = ""
-                st.success("已登出并清空凭据")
+                # 登出后恢复为系统默认账号
+                st.session_state["ifind_user_name"] = IFIND_DEFAULT_LOGIN["username"]
+                st.session_state["ifind_password"] = IFIND_DEFAULT_LOGIN["password"]
+                st.session_state["ifind_user_input"] = IFIND_DEFAULT_LOGIN["username"]
+                st.session_state["ifind_pwd_input"] = "********"
+                st.success("已登出，已恢复系统默认账号")
                 st.rerun()
         else:
             ifind_user = st.text_input(
                 "iFinD 账号",
                 value=st.session_state["ifind_user_name"],
                 key="ifind_user_input",
-                placeholder="请输入iFinD账号",
             )
+            # 密码框：默认显示掩码占位符，避免明文默认密码暴露；
+            # 员工输入新密码后自动覆盖默认密码。
             ifind_pwd = st.text_input(
                 "iFinD 密码",
-                value=st.session_state["ifind_password"],
+                value="********",
                 key="ifind_pwd_input",
                 type="password",
-                placeholder="请输入密码",
             )
+            if IFIND_DEFAULT_LOGIN["username"] or IFIND_DEFAULT_LOGIN["password"]:
+                st.info("默认已填入系统账号密码，可直接登录；如需使用个人账号，请删除默认内容后输入自己的账号密码。")
             st.session_state["ifind_user_name"] = ifind_user
-            st.session_state["ifind_password"] = ifind_pwd
+            if ifind_pwd != "********":
+                st.session_state["ifind_password"] = ifind_pwd
+            resolved_pwd = st.session_state.get("ifind_password", "")
 
             login_col, logout_col = st.columns(2)
             with login_col:
                 if st.button("登录 iFinD", key="ifind_login_btn", use_container_width=True):
-                    if ifind_user and ifind_pwd:
-                        set_ifind_credentials(ifind_user, ifind_pwd)
+                    if ifind_user and resolved_pwd:
+                        set_ifind_credentials(ifind_user, resolved_pwd)
                         ok = ifind_login(force=True)
                         if ok:
                             st.success("iFinD 登录成功")
                             st.rerun()
                         else:
                             st.error("iFinD 登录失败，请检查账号密码及终端状态")
+                    elif not ifind_user:
+                        st.warning("请先填写账号")
                     else:
-                        st.warning("请先填写账号和密码")
+                        st.warning("未配置默认密码，请输入密码后登录")
             with logout_col:
                 if st.button("登出 iFinD", key="ifind_logout_btn", use_container_width=True):
                     ifind_logout()
                     clear_ifind_credentials()
-                    st.session_state["ifind_user_name"] = ""
-                    st.session_state["ifind_password"] = ""
-                    st.success("已登出并清空凭据")
+                    st.session_state["ifind_user_name"] = IFIND_DEFAULT_LOGIN["username"]
+                    st.session_state["ifind_password"] = IFIND_DEFAULT_LOGIN["password"]
+                    st.session_state["ifind_user_input"] = IFIND_DEFAULT_LOGIN["username"]
+                    st.session_state["ifind_pwd_input"] = "********"
+                    st.success("已登出，已恢复系统默认账号")
                     st.rerun()
 
             st.caption("iFinD 状态：未登录")
