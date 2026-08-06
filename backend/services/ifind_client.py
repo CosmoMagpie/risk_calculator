@@ -525,6 +525,48 @@ def get_onsite_option_greeks(
     return None, "未提供期权代码，且缺少本地 BS 模型所需参数（标的价格、行权价、到期天数）"
 
 
+def get_onsite_option_underlying_code(option_code: str) -> Optional[str]:
+    """
+    获取场内期权标的物同花顺代码（通过 iFinD API）
+
+    Args:
+        option_code: 期权代码（iFinD 格式，如 '10011855' 或 '10011855.SH'）
+
+    Returns:
+        str: 标的物代码，失败返回 None
+    """
+    if not _IFIND_AVAILABLE:
+        return None
+    if not ifind_login():
+        return None
+
+    try:
+        result = THS_DS(
+            option_code,
+            'ths_underlying_ths_code_option',
+            '1',
+            'Days:Tradedays,Fill:Blank',
+            (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+            datetime.now().strftime('%Y-%m-%d'),
+        )
+        if result is None:
+            return None
+        if hasattr(result, 'errorcode') and result.errorcode != 0:
+            print(f"[iFinD] THS_DS 获取标的物失败 {option_code}: {result.errorcode}, {result.errmsg}")
+            return None
+
+        data = pd.DataFrame(result.data)
+        if data.empty or 'ths_underlying_ths_code_option' not in data.columns:
+            return None
+
+        underlying_code = data['ths_underlying_ths_code_option'].dropna().iloc[-1]
+        return str(underlying_code) if underlying_code else None
+
+    except Exception as e:
+        print(f"[iFinD] 获取标的物失败 {option_code}: {e}")
+        return None
+
+
 def _calc_bs_greek(
     S: float, K: float, r: float, T_days: int,
     greek: str, option_type: str = 'call',

@@ -12,8 +12,8 @@ from typing import Dict, Any, List
 
 # 可选：如需用真实 iFinD 数据生成 TC02/TC08/TC10，可在本机临时填写；
 # 提交或发送代码前务必保持为空。留空时脚本使用既有 Mock 路径，仍生成全部11例。
-IFIND_USER_NAME = ""
-IFIND_PASSWORD = ""
+IFIND_USER_NAME = "glzq703"
+IFIND_PASSWORD = "96998XuY"
 if IFIND_USER_NAME and IFIND_PASSWORD:
     os.environ["IFIND_USER_NAME"] = IFIND_USER_NAME
     os.environ["IFIND_PASSWORD"] = IFIND_PASSWORD

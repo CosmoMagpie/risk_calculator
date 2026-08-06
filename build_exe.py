@@ -12,7 +12,7 @@ import os
 import shutil
 
 
-APP_NAME = "风控测算系统"
+APP_NAME = "QQ"
 ENTRY_SCRIPT = "run_desktop.py"
 
 
